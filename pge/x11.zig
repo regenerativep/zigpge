@@ -12,6 +12,8 @@ pub const c = @cImport({
     @cInclude("glx.h");
 });
 
+const g = @import("gl.zig");
+
 pub const XError = error{
     XBadRequest,
     XBadValue,
@@ -139,30 +141,6 @@ pub fn initGlxErrors(display: Display) bool {
     return result;
 }
 
-pub const GlError = error{
-    GlInvalidEnum,
-    GlInvalidValue,
-    GlInvalidOperation,
-    GlStackOverflow,
-    GlStackUnderflow,
-    GlOutOfMemory,
-    GlInvalidFramebufferOperation,
-};
-pub fn getGlError() ?GlError {
-    const code = c.glGetError();
-    return switch (code) {
-        c.GL_NO_ERROR => null,
-        c.GL_INVALID_ENUM => error.GlInvalidEnum,
-        c.GL_INVALID_VALUE => error.GlInvalidValue,
-        c.GL_INVALID_OPERATION => error.GlInvalidOperation,
-        c.GL_STACK_OVERFLOW => error.GlStackOverflow,
-        c.GL_STACK_UNDERFLOW => error.GlStackUnderflow,
-        c.GL_OUT_OF_MEMORY => error.GlOutOfMemory,
-        c.GL_INVALID_FRAMEBUFFER_OPERATION => error.GlInvalidFramebufferOperation,
-        else => std.debug.panic("unknown GL error received {}", .{code}),
-    };
-}
-
 pub const EventMask = packed struct(c_long) {
     key_press: bool = false,
     key_release: bool = false,
@@ -268,6 +246,8 @@ pub const Cursor = c.Cursor;
 
 pub const Window = struct {
     inner: c.Window,
+
+    pub const None = Window{ .inner = 0 };
 
     pub const BitGravity = enum(c_int) {
         Forget = c.ForgetGravity,
@@ -487,7 +467,7 @@ pub const Attributes = struct {
         var count: usize = 0;
         inline for (fields) |field| {
             const val = @field(self, field.name);
-            switch (field.field_type) {
+            switch (field.type) {
                 bool => count += @boolToInt(val),
                 else => count += if (val != null) 2 else 0,
             }
@@ -498,7 +478,7 @@ pub const Attributes = struct {
         var i: usize = 0;
         inline for (fields) |field| {
             const val = @field(self, field.name);
-            const present = switch (field.field_type) {
+            const present = switch (field.type) {
                 bool => val,
                 else => val != null,
             };
@@ -506,7 +486,7 @@ pub const Attributes = struct {
                 if (i >= buffer.len) return error.Overflow;
                 buffer[i] = @enumToInt(@field(VisualAttribute, field.name));
                 i += 1;
-                switch (field.field_type) {
+                switch (field.type) {
                     bool => {},
                     ?i32 => {
                         if (i >= buffer.len) return error.Overflow;
@@ -568,7 +548,9 @@ pub fn internAtom(display: Display, name: [:0]const u8, only_if_exists: bool) !A
 }
 
 pub const Context = struct {
-    inner: c.GLXContext, // note that, on the c side, this is nullable
+    inner: c.GLXContext,
+
+    pub const None = Context{ .inner = null };
 
     pub fn create(display: Display, visual_info: VisualInfo, share_list: Context, direct: bool) !Context {
         const ctx = c.glXCreateContext(display.inner, visual_info.inner, share_list.inner, @boolToInt(direct));
@@ -577,44 +559,6 @@ pub const Context = struct {
     }
     pub fn destroy(self: Context, display: Display) void {
         c.glXDestroyContext(display.inner, self.inner);
-        assert(getGlError() == null);
+        assert(getError() == null); // will error if `self` is bad
     }
 };
-
-pub fn getProcAddress(comptime T: type, name: [:0]const u8) ?*const T {
-    return @ptrCast(?*const T, c.glXGetProcAddress(name.ptr));
-}
-
-pub fn LoadFns(comptime pairs: anytype) type {
-    comptime var fields: [pairs.len]std.builtin.Type.StructField = undefined;
-    comptime var i = 0;
-    for (fields) |*field| {
-        const T = ?*const pairs[i][1];
-        field.* = .{
-            .name = pairs[i][0],
-            .field_type = T,
-            .default_value = @as(T, null),
-            .is_comptime = false,
-            .alignment = @alignOf(T),
-        };
-        i += 1;
-    }
-    const InnerType = @Type(.{ .Struct = .{
-        .layout = .Auto,
-        .fields = &fields,
-        .decls = &.{},
-        .is_tuple = false,
-    } });
-    return struct {
-        pub const Inner = InnerType;
-        pub fn load() Inner {
-            var self: Inner = undefined;
-            inline for (pairs) |pair| {
-                const name = pair[0];
-                const T = pair[1];
-                @field(self, name) = getProcAddress(T, name);
-            }
-            return self;
-        }
-    };
-}

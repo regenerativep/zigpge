@@ -20,7 +20,6 @@ pub const NormalizedKey = blk: {
         .fields = &fields,
         .decls = &.{},
         .is_exhaustive = true,
-        .layout = .Auto,
     } });
 };
 pub fn normalizeKey(key: Impl.Key) ?NormalizedKey {
@@ -284,7 +283,7 @@ pub fn PixelGameEngine(comptime UserGame: type) type {
 
             // TODO: console show thing
 
-            try Impl.updateViewport(self.state.view_pos, self.state.view_size);
+            Impl.updateViewport(self.state.view_pos, self.state.view_size);
             Impl.clearBuffer(Pixel.Black, true);
 
             self.state.layers.items[0].show = true;
@@ -293,7 +292,7 @@ pub fn PixelGameEngine(comptime UserGame: type) type {
             self.impl.prepareDrawing();
 
             for (self.state.layers.items) |*layer| if (layer.show) {
-                Impl.applyTexture(layer.draw_target.inner.id) catch unreachable;
+                layer.draw_target.inner.tex.apply() catch unreachable;
                 if (layer.update) {
                     try layer.draw_target.inner.update();
                     layer.update = false;
@@ -431,15 +430,15 @@ pub const Sprite = struct {
 
 pub const Decal = struct {
     sprite: *Sprite, // not owned by Decal (except when under OwnedDecal)
-    id: u32,
+    tex: Impl.Texture,
     uv_scale: VF2D = .{ .x = 1.0, .y = 1.0 },
 
     pub fn init(sprite: *Sprite, filter: bool, clamp: bool) !Decal {
         var self = Decal{
             .sprite = sprite,
-            .id = try Impl.createTexture(sprite.width, sprite.height, filter, clamp),
+            .tex = try Impl.Texture.init(sprite.width, sprite.height, filter, clamp),
         };
-        errdefer Impl.deleteTexture(self.id);
+        errdefer self.tex.deinit();
         try self.update();
         return self;
     }
@@ -448,11 +447,11 @@ pub const Decal = struct {
             .x = 1.0 / @intToFloat(f32, self.sprite.width),
             .y = 1.0 / @intToFloat(f32, self.sprite.height),
         };
-        try Impl.applyTexture(self.id);
-        try Impl.updateTexture(self.id, self.sprite);
+        try self.tex.apply();
+        self.tex.update(self.sprite);
     }
     pub fn deinit(self: *Decal) void {
-        Impl.deleteTexture(self.id);
+        self.tex.deinit();
         self.* = undefined;
     }
 };
@@ -524,6 +523,7 @@ pub const DecalInstance = struct {
 
 pub const LinuxImpl = struct {
     const x = @import("x11.zig");
+    const g = @import("gl.zig");
 
     pub const XState = struct {
         display: x.Display,
@@ -633,17 +633,38 @@ pub const LinuxImpl = struct {
 
     device_context: x.Context,
 
-    fns: LoadFns.Inner,
-
-    n_fs: x.c.GLuint,
-    n_vs: x.c.GLuint,
-    n_quad: x.c.GLuint,
-    vb_quad: x.c.GLuint,
-    va_quad: x.c.GLuint,
+    n_fs: ge.Shader,
+    n_vs: ge.Shader,
+    n_quad: ge.Program,
+    vb_quad: ge.Buffer,
+    va_quad: ge.VertexArray,
     blank_quad: OwnedDecal,
 
     decal_mode: DecalMode = .Normal,
 
+    pub const ge = g.Extensions(.{
+        .{ "glXSwapIntervalEXT", fn (*x.c.Display, x.c.GLXDrawable, c_int) callconv(.C) void },
+        .{ "glCreateShader", fn (x.c.GLenum) callconv(.C) x.c.GLuint, true },
+        .{ "glCompileShader", fn (x.c.GLuint) callconv(.C) void, true },
+        .{ "glShaderSource", fn (x.c.GLuint, x.c.GLsizei, [*]const [:0]const u8, ?[*]x.c.GLint) callconv(.C) void, true },
+        .{ "glDeleteShader", fn (x.c.GLuint) callconv(.C) void, true },
+        .{ "glCreateProgram", fn () callconv(.C) x.c.GLuint, true },
+        .{ "glDeleteProgram", fn (x.c.GLuint) callconv(.C) void, true },
+        .{ "glLinkProgram", fn (x.c.GLuint) callconv(.C) void, true },
+        .{ "glAttachShader", fn (x.c.GLuint, x.c.GLuint) callconv(.C) void, true },
+        .{ "glBindBuffer", fn (x.c.GLenum, x.c.GLuint) callconv(.C) void, true },
+        .{ "glBufferData", fn (x.c.GLenum, x.c.GLsizeiptr, *const anyopaque, x.c.GLenum) callconv(.C) void, true },
+        .{ "glGenBuffers", fn (x.c.GLsizei, [*]x.c.GLuint) callconv(.C) void, true },
+        .{ "glDeleteBuffers", fn (x.c.GLsizei, [*]const x.c.GLuint) callconv(.C) void, true },
+        .{ "glVertexAttribPointer", fn (x.c.GLuint, x.c.GLint, x.c.GLenum, x.c.GLboolean, x.c.GLsizei, usize) callconv(.C) void, true },
+        .{ "glEnableVertexAttribArray", fn (x.c.GLuint) callconv(.C) void, true },
+        .{ "glUseProgram", fn (x.c.GLuint) callconv(.C) void },
+        .{ "glGetShaderInfoLog", fn (x.c.GLuint, [*c]const u8) callconv(.C) void },
+        .{ "glBindVertexArray", fn (x.c.GLuint) callconv(.C) void, true },
+        .{ "glGenVertexArrays", fn (x.c.GLsizei, [*]x.c.GLuint) callconv(.C) void, true },
+        .{ "glDeleteVertexArrays", fn (x.c.GLsizei, [*]const x.c.GLuint) callconv(.C) void, true },
+        .{ "glGetShaderiv", fn (x.c.GLuint, x.c.GLenum, *x.c.GLint) callconv(.C) void, true },
+    });
     const Self = @This();
 
     pub fn init(alloc: Allocator, state: *EngineState) !Self {
@@ -658,54 +679,21 @@ pub const LinuxImpl = struct {
         errdefer x_state.display.makeCurrent(x.Window{ .inner = 0 }, x.Context{ .inner = null }) catch unreachable;
 
         const gwa = try x_state.window.getAttributes(x_state.display);
-        x.c.glViewport(0, 0, gwa.width, gwa.height);
+        g.viewport(0, 0, @intCast(u32, gwa.width), @intCast(u32, gwa.height));
 
-        const fns = LoadFns.load();
+        try ge.load();
 
-        if (fns.glXSwapIntervalEXT) |glXSwapIntervalEXT| {
-            if (!state.vsync) glXSwapIntervalEXT(x_state.display.inner, x_state.window.inner, 0);
-        } else if (!state.vsync) {
-            std.log.warn("cannot disable vsync (no glXSwapIntervalEXT)", .{});
-        }
-
-        // required functions
-        // TODO make required functions not need optional unwrap syntax to use
-        var missing_functions = false;
-        inline for (.{
-            "glCreateShader",
-            "glDeleteShader",
-            "glShaderSource",
-            "glCompileShader",
-            "glCreateProgram",
-            "glDeleteProgram",
-            "glAttachShader",
-            "glLinkProgram",
-            "glGetShaderiv",
-            "glGenBuffers",
-            "glDeleteBuffers",
-            "glGenVertexArrays",
-            "glBindVertexArray",
-            "glBindBuffer",
-            "glBufferData",
-            "glVertexAttribPointer",
-            "glDeleteVertexArrays",
-            "glEnableVertexAttribArray",
-        }) |field_name| {
-            if (@field(fns, field_name) == null) {
-                std.log.err("Missing OpenGL function \"{s}\"", .{field_name});
-                missing_functions = true;
-            }
-        }
-        if (missing_functions) {
-            return error.MissingGlFunction;
-        }
+        if (!state.vsync)
+            if (ge.has("glXSwapIntervalEXT"))
+                ge.swapInterval(x_state.display, x_state.window.inner, 0)
+            else
+                std.log.warn("cannot disable vsync (no glXSwapIntervalEXT)", .{});
 
         // why did pge hardcode the number here to specify fragment shader?
-        const nFS = fns.glCreateShader.?(x.c.GL_FRAGMENT_SHADER);
-        if (nFS == 0) return x.getGlError().?;
-        errdefer fns.glDeleteShader.?(nFS);
+        var nFS = ge.Shader.init(.Fragment);
+        errdefer nFS.deinit();
         // note: following shaders not made for arm. see relevant olcPixelGameEngine source
-        var strFS =
+        const strFS =
             \\#version 330 core
             \\out vec4 pixel;
             \\in vec2 oTex;
@@ -715,15 +703,13 @@ pub const LinuxImpl = struct {
             \\  pixel = texture(sprTex, oTex) * oCol;
             \\}
         ;
-        fns.glShaderSource.?(nFS, 1, @ptrCast([*][:0]const u8, &strFS), null);
-        if (x.getGlError()) |e| return e;
-        fns.glCompileShader.?(nFS);
-        if (x.getGlError()) |e| return e;
+        nFS.source(&[1][:0]const u8{strFS}, null);
+        nFS.compile();
+        if (!nFS.getCompileStatus()) return error.ShaderCompilationFailure;
 
-        const nVS = fns.glCreateShader.?(x.c.GL_VERTEX_SHADER);
-        if (nVS == 0) return x.getGlError().?;
-        errdefer fns.glDeleteShader.?(nVS);
-        var strVS =
+        var nVS = ge.Shader.init(.Vertex);
+        errdefer nVS.deinit();
+        const strVS =
             \\#version 330 core
             \\layout(location = 0) in vec3 aPos;
             \\layout(location = 1) in vec2 aTex;
@@ -738,77 +724,35 @@ pub const LinuxImpl = struct {
             \\  oCol = aCol;
             \\}
         ;
-        fns.glShaderSource.?(nVS, 1, @ptrCast([*][:0]const u8, &strVS), null);
-        if (x.getGlError()) |e| return e;
-        fns.glCompileShader.?(nVS);
-        if (x.getGlError()) |e| return e;
+        nVS.source(&[1][:0]const u8{strVS}, null);
+        nVS.compile();
+        if (!nVS.getCompileStatus()) return error.ShaderCompilationFailure;
 
-        const quad = fns.glCreateProgram.?();
-        if (quad == 0) return x.getGlError().?;
-        errdefer fns.glDeleteProgram.?(quad);
-        fns.glAttachShader.?(quad, nFS);
-        if (x.getGlError()) |e| return e;
-        fns.glAttachShader.?(quad, nVS);
-        if (x.getGlError()) |e| return e;
-        fns.glLinkProgram.?(quad);
-        if (x.getGlError()) |e| return e;
+        var quad = ge.Program.init();
+        errdefer quad.deinit();
+        try quad.attachShader(nFS);
+        try quad.attachShader(nVS);
+        try quad.link();
 
-        var vb_quad: x.c.GLuint = undefined;
-        fns.glGenBuffers.?(1, @as(*[1]x.c.GLuint, &vb_quad));
-        if (x.getGlError()) |e| return e;
-        errdefer fns.glDeleteBuffers.?(1, @as(*[1]x.c.GLuint, &vb_quad));
-        var va_quad: x.c.GLuint = undefined;
-        fns.glGenVertexArrays.?(1, @as(*[1]x.c.GLuint, &va_quad));
-        if (x.getGlError()) |e| return e;
-        errdefer fns.glDeleteVertexArrays.?(1, @as(*[1]x.c.GLuint, &va_quad));
-        fns.glBindVertexArray.?(va_quad);
-        if (x.getGlError()) |e| return e;
-        fns.glBindBuffer.?(x.c.GL_ARRAY_BUFFER, vb_quad);
-        if (x.getGlError()) |e| return e;
+        var vb_quad = ge.Buffer.init();
+        errdefer vb_quad.deinit();
+        var va_quad = ge.VertexArray.init();
+        errdefer va_quad.deinit();
+        va_quad.bind();
+        vb_quad.bind(.Array);
 
-        // what is purpose of this?
         var verts: [MaxVerts]LocVertex = undefined;
-        fns.glBufferData.?(x.c.GL_ARRAY_BUFFER, @sizeOf(@TypeOf(verts)), &verts, x.c.GL_STREAM_DRAW);
-        if (x.getGlError()) |e| return e;
-        fns.glVertexAttribPointer.?(
-            0,
-            3,
-            x.c.GL_FLOAT,
-            x.c.GL_FALSE,
-            @sizeOf(LocVertex),
-            @offsetOf(LocVertex, "pos"),
-        );
-        if (x.getGlError()) |e| return e;
-        fns.glEnableVertexAttribArray.?(0);
-        if (x.getGlError()) |e| return e;
-        fns.glVertexAttribPointer.?(
-            1,
-            2,
-            x.c.GL_FLOAT,
-            x.c.GL_FALSE,
-            @sizeOf(LocVertex),
-            @offsetOf(LocVertex, "tex"),
-        );
-        if (x.getGlError()) |e| return e;
-        fns.glEnableVertexAttribArray.?(1);
-        if (x.getGlError()) |e| return e;
-        fns.glVertexAttribPointer.?(
-            2,
-            4,
-            x.c.GL_UNSIGNED_BYTE,
-            x.c.GL_TRUE,
-            @sizeOf(LocVertex),
-            @offsetOf(LocVertex, "col"),
-        );
-        if (x.getGlError()) |e| return e;
-        fns.glEnableVertexAttribArray.?(2);
-        if (x.getGlError()) |e| return e;
-        fns.glBindBuffer.?(x.c.GL_ARRAY_BUFFER, 0);
-        if (x.getGlError()) |e| return e;
-        fns.glBindVertexArray.?(0);
-        if (x.getGlError()) |e| return e;
+        try ge.Buffer.data(.Array, LocVertex, &verts, .StreamDraw);
+        try ge.vertexAttribPointer(0, 3, .Float, false, @sizeOf(LocVertex), @offsetOf(LocVertex, "pos"));
+        ge.enableVertexAttribArray(0);
+        try ge.vertexAttribPointer(1, 2, .Float, false, @sizeOf(LocVertex), @offsetOf(LocVertex, "tex"));
+        ge.enableVertexAttribArray(1);
+        try ge.vertexAttribPointer(2, 4, .UnsignedByte, true, @sizeOf(LocVertex), @offsetOf(LocVertex, "col"));
+        ge.enableVertexAttribArray(2);
+        ge.Buffer.None.bind(.Array);
+        ge.VertexArray.None.bind();
 
-        try updateViewport(state.view_pos, state.view_size);
+        updateViewport(state.view_pos, state.view_size);
 
         var blank_sprite: *Sprite = undefined;
         var blank_quad: OwnedDecal = undefined;
@@ -829,7 +773,6 @@ pub const LinuxImpl = struct {
 
         return Self{
             .x_state = x_state,
-            .fns = fns,
             .n_quad = quad,
             .vb_quad = vb_quad,
             .va_quad = va_quad,
@@ -840,124 +783,79 @@ pub const LinuxImpl = struct {
         };
     }
     pub fn deinit(self: *Self, alloc: Allocator) void {
-        self.x_state.display.makeCurrent(x.Window{ .inner = 0 }, x.Context{ .inner = null }) catch unreachable;
+        self.x_state.display.makeCurrent(x.Window.None, x.Context.None) catch unreachable;
         self.device_context.destroy(self.x_state.display);
-        self.fns.glDeleteVertexArrays.?(1, @ptrCast([*]const c_uint, &self.va_quad));
-        self.fns.glDeleteBuffers.?(1, @ptrCast([*]const c_uint, &self.vb_quad));
-        self.fns.glDeleteProgram.?(self.n_quad);
-        self.fns.glDeleteShader.?(self.n_vs);
-        self.fns.glDeleteShader.?(self.n_fs);
+        self.va_quad.deinit();
+        self.vb_quad.deinit();
+        self.n_quad.deinit();
+        self.n_vs.deinit();
+        self.n_fs.deinit();
         self.blank_quad.deinit(alloc);
         self.x_state.deinit();
         self.* = undefined;
     }
 
-    pub const LoadFns = x.LoadFns(.{
-        .{ "glXSwapIntervalEXT", fn (*x.c.Display, x.c.GLXDrawable, c_int) callconv(.C) void },
-        .{ "glCreateShader", fn (x.c.GLenum) callconv(.C) x.c.GLuint },
-        .{ "glCompileShader", fn (x.c.GLuint) callconv(.C) void },
-        .{ "glShaderSource", fn (x.c.GLuint, x.c.GLsizei, [*][:0]const u8, ?*x.c.GLint) callconv(.C) void },
-        .{ "glDeleteShader", fn (x.c.GLuint) callconv(.C) void },
-        .{ "glCreateProgram", fn () callconv(.C) x.c.GLuint },
-        .{ "glDeleteProgram", fn (x.c.GLuint) callconv(.C) void },
-        .{ "glLinkProgram", fn (x.c.GLuint) callconv(.C) void },
-        .{ "glAttachShader", fn (x.c.GLuint, x.c.GLuint) callconv(.C) void },
-        .{ "glBindBuffer", fn (x.c.GLenum, x.c.GLuint) callconv(.C) void },
-        .{ "glBufferData", fn (x.c.GLenum, x.c.GLsizeiptr, *const anyopaque, x.c.GLenum) callconv(.C) void },
-        .{ "glGenBuffers", fn (x.c.GLsizei, [*]x.c.GLuint) callconv(.C) void },
-        .{ "glDeleteBuffers", fn (x.c.GLsizei, [*]const x.c.GLuint) callconv(.C) void },
-        .{ "glVertexAttribPointer", fn (x.c.GLuint, x.c.GLint, x.c.GLenum, x.c.GLboolean, x.c.GLsizei, usize) callconv(.C) void },
-        .{ "glEnableVertexAttribArray", fn (x.c.GLuint) callconv(.C) void },
-        .{ "glUseProgram", fn (x.c.GLuint) callconv(.C) void },
-        .{ "glGetShaderInfoLog", fn (x.c.GLuint, [*c]const u8) callconv(.C) void },
-        .{ "glBindVertexArray", fn (x.c.GLuint) callconv(.C) void },
-        .{ "glGenVertexArrays", fn (x.c.GLsizei, [*]x.c.GLuint) callconv(.C) void },
-        .{ "glDeleteVertexArrays", fn (x.c.GLsizei, [*]const x.c.GLuint) callconv(.C) void },
-        .{ "glGetShaderiv", fn (x.c.GLuint, x.c.GLenum, *x.c.GLint) callconv(.C) void },
-    });
-
-    pub fn updateViewport(pos: V2D, size: V2D) !void {
-        x.c.glViewport(pos.x, pos.y, size.x, size.y);
-        if (x.getGlError()) |e| return e;
+    pub fn updateViewport(pos: V2D, size: V2D) void {
+        g.viewport(pos.x, pos.y, @intCast(u32, size.x), @intCast(u32, size.y));
     }
 
-    pub fn createTexture(width: u32, height: u32, filter: bool, clamp: bool) !u32 {
-        _ = width;
-        _ = height;
-        var id: u32 = undefined;
-        x.c.glGenTextures(1, &id);
-        if (x.getGlError()) |e| return e;
-        errdefer x.c.glDeleteTextures(1, &id);
-        x.c.glBindTexture(x.c.GL_TEXTURE_2D, id);
-        if (x.getGlError()) |e| return e;
+    pub const Texture = struct {
+        inner: g.Texture,
 
-        // hopefully order doesnt matter. noted that the pge code isnt in same order
-        x.c.glTexParameteri(
-            x.c.GL_TEXTURE_2D,
-            x.c.GL_TEXTURE_MIN_FILTER,
-            if (filter) x.c.GL_LINEAR else x.c.GL_NEAREST,
-        );
-        if (x.getGlError()) |e| return e;
-        x.c.glTexParameteri(
-            x.c.GL_TEXTURE_2D,
-            x.c.GL_TEXTURE_MAG_FILTER,
-            if (filter) x.c.GL_LINEAR else x.c.GL_NEAREST,
-        );
-        if (x.getGlError()) |e| return e;
+        pub fn init(width: u32, height: u32, filter: bool, clamp: bool) !Texture {
+            _ = width;
+            _ = height;
+            var tex = g.Texture.init();
+            errdefer tex.deinit();
+            tex.bind(.TwoD);
 
-        x.c.glTexParameteri(
-            x.c.GL_TEXTURE_2D,
-            x.c.GL_TEXTURE_WRAP_S,
-            if (clamp) x.c.GL_CLAMP else x.c.GL_REPEAT,
-        );
-        if (x.getGlError()) |e| return e;
-        x.c.glTexParameteri(
-            x.c.GL_TEXTURE_2D,
-            x.c.GL_TEXTURE_WRAP_T,
-            if (clamp) x.c.GL_CLAMP else x.c.GL_REPEAT,
-        );
-        if (x.getGlError()) |e| return e;
+            // hopefully order doesnt matter. noted that the pge code isnt in same order
+            comptime var P = g.TextureParameterValue(.MinFilter); // i guess zig type inference isnt good enough?
+            g.texParameter(.TwoD, .MinFilter, if (filter) P.Linear else P.Nearest);
+            P = g.TextureParameterValue(.MagFilter);
+            g.texParameter(.TwoD, .MagFilter, if (filter) P.Linear else P.Nearest);
+            // note: pge uses GL_CLAMP, not GL_CLAMP_TO_EDGE here. unsure if this is a problem
+            P = g.TextureParameterValue(.WrapS);
+            g.texParameter(.TwoD, .WrapS, if (clamp) P.ClampToEdge else P.Repeat);
+            P = g.TextureParameterValue(.WrapT);
+            g.texParameter(.TwoD, .WrapT, if (clamp) P.ClampToEdge else P.Repeat);
 
-        return id;
-    }
-    pub fn deleteTexture(id: u32) void {
-        var _id = id;
-        x.c.glDeleteTextures(1, &_id);
-    }
-    pub fn applyTexture(id: u32) !void {
-        x.c.glBindTexture(x.c.GL_TEXTURE_2D, id);
-        if (x.getGlError()) |e| return e;
-    }
-    pub fn updateTexture(id: u32, sprite: *Sprite) !void {
-        _ = id;
-        x.c.glTexImage2D(
-            x.c.GL_TEXTURE_2D,
-            0,
-            x.c.GL_RGBA,
-            @intCast(x.c.GLsizei, sprite.width),
-            @intCast(x.c.GLsizei, sprite.height),
-            0,
-            x.c.GL_RGBA,
-            x.c.GL_UNSIGNED_BYTE,
-            sprite.data.ptr,
-        );
-        if (x.getGlError()) |e| return e;
-    }
-    pub fn readTexture(id: u32, sprite: *Sprite) !void {
-        _ = id;
-        x.c.glReadPixels(0, 0, sprite.width, sprite.height, x.c.GL_RGBA, x.c.GL_UNSIGNED_BYTE, sprite.data);
-        if (x.getGlError()) |e| return e;
-    }
+            return Texture{ .inner = tex };
+        }
+        pub fn deinit(tex: *Texture) void {
+            tex.inner.deinit();
+        }
+        pub fn apply(tex: Texture) !void {
+            tex.inner.bind(.TwoD);
+        }
+        pub fn update(tex: Texture, sprite: *Sprite) void {
+            _ = tex;
+            g.texImage2D(
+                .TwoD,
+                0,
+                .RGBA,
+                @intCast(u32, sprite.width),
+                @intCast(u32, sprite.height),
+                0,
+                .RGBA,
+                .UnsignedByte,
+                @ptrCast([*]const u8, sprite.data.ptr),
+            );
+        }
 
-    pub fn clearBuffer(p: Pixel, depth: bool) void {
-        x.c.glClearColor(
-            @intToFloat(f32, p.c.r) / 255.0,
-            @intToFloat(f32, p.c.g) / 255.0,
-            @intToFloat(f32, p.c.b) / 255.0,
-            @intToFloat(f32, p.c.a) / 255.0,
-        );
-        x.c.glClear(x.c.GL_COLOR_BUFFER_BIT);
-        if (depth) x.c.glClear(x.c.GL_DEPTH_BUFFER_BIT);
+        pub fn read(tex: Texture, sprite: *Sprite) void {
+            _ = tex;
+            g.readPixels(0, 0, @intCast(u32, sprite.width), @intCast(u32, sprite.height), .RGBA, .UnsignedByte, sprite.data.ptr);
+        }
+    };
+
+    pub fn clearBuffer(p: Pixel, comptime depth: bool) void {
+        g.clear(&(.{.Color} ++ if (depth) .{.Depth} else .{}), .{ .color = .{
+            .r = @intToFloat(f32, p.c.r) / 255.0,
+            .g = @intToFloat(f32, p.c.g) / 255.0,
+            .b = @intToFloat(f32, p.c.b) / 255.0,
+            .a = @intToFloat(f32, p.c.a) / 255.0,
+        } });
     }
 
     pub fn mapKey(key: x.c.KeySym) Key {
@@ -1021,33 +919,33 @@ pub const LinuxImpl = struct {
     }
 
     pub fn setDecalMode(self: *Self, mode: DecalMode) void {
-        defer self.decal_mode = mode;
-        x.c.glBlendFunc(
+        self.decal_mode = mode;
+        g.blendFunc(
             switch (mode) {
-                .Normal, .Additive, .Wireframe => x.c.GL_SRC_ALPHA,
-                .Multiplicative => x.c.GL_DST_COLOR,
-                .Stencil => x.c.GL_ZERO,
-                .Illuminate => x.c.GL_ONE_MINUS_SRC_ALPHA,
+                .Normal, .Additive, .Wireframe => .SrcAlpha,
+                .Multiplicative => .DstColor,
+                .Stencil => .Zero,
+                .Illuminate => .OneMinusSrcAlpha,
                 else => return,
             },
             switch (mode) {
-                .Normal, .Multiplicative, .Wireframe => x.c.GL_ONE_MINUS_SRC_ALPHA,
-                .Additive => x.c.GL_ONE,
-                .Stencil, .Illuminate => x.c.GL_SRC_ALPHA,
+                .Normal, .Multiplicative, .Wireframe => .OneMinusSrcAlpha,
+                .Additive => .One,
+                .Stencil, .Illuminate => .SrcAlpha,
                 else => return,
             },
         );
     }
 
     pub fn prepareDrawing(self: *Self) void {
-        x.c.glEnable(x.c.GL_BLEND);
+        g.enable(.Blend);
         self.setDecalMode(.Normal);
-        self.fns.glUseProgram.?(self.n_quad);
-        self.fns.glBindVertexArray.?(self.va_quad);
+        self.n_quad.use();
+        self.va_quad.bind();
     }
 
     pub fn drawLayerQuad(self: *Self, offset: VF2D, scale: VF2D, tint: Pixel) !void {
-        self.fns.glBindBuffer.?(x.c.GL_ARRAY_BUFFER, self.vb_quad);
+        self.vb_quad.bind(.Array);
         const verts = [4]LocVertex{
             .{
                 .pos = .{ -1.0, -1.0, 1.0 },
@@ -1070,29 +968,22 @@ pub const LinuxImpl = struct {
                 .col = tint,
             },
         };
-        self.fns.glBufferData.?(x.c.GL_ARRAY_BUFFER, @sizeOf(@TypeOf(verts)), &verts, x.c.GL_STREAM_DRAW);
-        if (x.getGlError()) |e| return e;
-        x.c.glDrawArrays(x.c.GL_TRIANGLE_STRIP, 0, 4);
-        //if (x.getGlError()) |e| return e;
+        try ge.Buffer.data(.Array, LocVertex, &verts, .StreamDraw);
+        g.drawArrays(.TriangleStrip, 0, 4);
     }
     pub fn drawDecal(self: *Self, decal: DecalInstance) !void {
         self.setDecalMode(decal.mode);
-        x.c.glBindTexture(x.c.GL_TEXTURE_2D, decal.decal.id);
-        self.fns.glBindBuffer.?(x.c.GL_ARRAY_BUFFER, self.vb_quad);
-        self.fns.glBufferData.?(
-            x.c.GL_ARRAY_BUFFER,
-            @intCast(x.c.GLsizeiptr, decal.vertices.len),
-            decal.vertices.ptr,
-            x.c.GL_STREAM_DRAW,
-        );
-        x.c.glDrawArrays(if (self.decal_mode == .Wireframe)
-            x.c.GL_LINE_LOOP
+        decal.decal.tex.inner.bind(.TwoD);
+        self.vb_quad.bind(.Array);
+        try ge.Buffer.data(.Array, LocVertex, decal.vertices, .StreamDraw);
+        g.drawArrays(if (self.decal_mode == .Wireframe)
+            .LineLoop
         else switch (decal.structure) {
-            .Fan => x.c.GL_TRIANGLE_FAN,
-            .Strip => x.c.GL_TRIANGLE_STRIP,
-            .List => x.c.GL_TRIANGLES,
+            .Fan => .TriangleFan,
+            .Strip => .TriangleStrip,
+            .List => .Triangles,
             .Line => @panic("i guess youre not supposed to use this?"),
-        }, 0, @intCast(x.c.GLsizei, decal.vertices.len));
+        }, 0, @intCast(u32, decal.vertices.len));
     }
 
     pub fn displayFrame(self: *Self) !void {
