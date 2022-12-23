@@ -303,10 +303,10 @@ pub fn PixelGameEngine(comptime UserGame: type) type {
             };
 
             try self.impl.displayFrame();
-            self.second_count += fElapsed;
-            const every_n_frames = 60;
-            if (self.frame_i > every_n_frames) {
-                const fps = every_n_frames / self.second_count;
+
+            const every_n_seconds: f32 = 1;
+            if (self.second_count > every_n_seconds) {
+                const fps = @intToFloat(f32, self.frame_i) / self.second_count;
                 const format = "Pixel Game Engine - {s} - FPS: {}";
                 var buf = [_]u8{0} ** (format.len + 257);
                 var title = std.fmt.bufPrintZ(
@@ -316,9 +316,10 @@ pub fn PixelGameEngine(comptime UserGame: type) type {
                 ) catch buf[0 .. buf.len - 1 :0];
                 try self.impl.setWindowTitle(title);
                 self.frame_i = 0;
-                self.second_count = 0;
+                self.second_count -= every_n_seconds;
             }
             self.frame_i += 1;
+            self.second_count += fElapsed;
         }
         pub fn constructFontSheet(alloc: Allocator) !OwnedDecal {
             // would be nice not to have a blob in the source code
