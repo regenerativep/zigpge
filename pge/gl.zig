@@ -359,6 +359,8 @@ pub fn Extensions(comptime pairs: anytype) type {
 }
 
 pub const TextureTarget = enum(c.GLenum) {
+    // im sorry. `.2D` would be nice but i dont think that is in zig without doing `.@"2D"`
+    // TODO: maybe... `.D2`? or just do `.Texture2D`?
     OneD = c.GL_TEXTURE_1D,
     TwoD = c.GL_TEXTURE_2D,
     ThreeD = c.GL_TEXTURE_3D,
@@ -478,6 +480,7 @@ pub fn texParameter(
     assert(getGlError() == null);
 }
 
+// TODO: merge with TextureTarget?
 pub const TexImageTarget = enum(c.GLenum) {
     TwoD = c.GL_TEXTURE_2D,
     Proxy2D = c.GL_PROXY_TEXTURE_2D,
