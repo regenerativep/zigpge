@@ -545,7 +545,7 @@ pub fn PixelGameEngine(comptime UserGame: type) type {
                 layer.decal_draws.clearRetainingCapacity();
             };
 
-            try self.impl.displayFrame();
+            self.impl.displayFrame();
 
             const every_n_seconds: f32 = 1;
             if (self.second_count > every_n_seconds) {
@@ -557,7 +557,7 @@ pub fn PixelGameEngine(comptime UserGame: type) type {
                     format,
                     .{ self.state.app_name, if (fps > 9999) 9999 else @floatToInt(u32, fps) },
                 ) catch buf[0 .. buf.len - 1 :0];
-                try self.impl.setWindowTitle(title);
+                self.impl.setWindowTitle(title);
                 self.frame_i = 0;
                 self.second_count -= every_n_seconds;
             }
@@ -863,12 +863,11 @@ pub const LinuxImpl = struct {
         ) !XState {
             if (!x.initThreads())
                 std.log.warn("X says it doesn't support multithreading", .{});
-            x.initErrorHandler();
+            x.errors.initHandler();
 
             const display = x.Display.open(null) orelse return error.DisplayOpenFailure;
             errdefer display.close();
-            if (!x.initGlxErrors(display))
-                std.log.warn("no GLX errors", .{});
+            if (!x.errors.initErrors(display)) return error.XErrorInitializationFailure;
             const window_root = display.defaultRootWindow();
 
             var visual_info = x.chooseVisual(display, 0, .{
@@ -908,8 +907,8 @@ pub const LinuxImpl = struct {
             var wm_delete = try x.internAtom(display, "WM_DELETE_WINDOW", true);
             try display.setWMProtocols(window, @as(*[1]x.Atom, &wm_delete));
 
-            try window.map(display);
-            try window.storeName(display, "zig pge"); // TODO: make this app_name? or dont do this here?
+            window.map(display);
+            display.storeName(window, "zig pge"); // TODO: make this app_name? or dont do this here?
 
             if (full_screen) {
                 const wm_state = try x.internAtom(display, "_NET_WM_STATE", false);
@@ -923,14 +922,14 @@ pub const LinuxImpl = struct {
                 xev.xclient.format = 32;
                 xev.xclient.data.l = [5]c_long{ @boolToInt(full_screen), @intCast(c_long, wm_state_fullscreen), 0, 0, 0 };
 
-                try window.map(display);
+                window.map(display);
                 try display.sendEvent(
                     window_root,
                     false,
                     .{ .substructure_redirect = true, .substructure_notify = true },
                     &xev,
                 );
-                try display.flush();
+                display.flush();
 
                 const gwa = try window.getAttributes(display);
                 window_size.* = .{ .x = gwa.width, .y = gwa.height };
@@ -1231,6 +1230,12 @@ pub const LinuxImpl = struct {
                 }
             }
         }
+        x.errors.has() catch |e| {
+            for (x.errors.list.slice()) |inst|
+                std.log.err("X error: {any}", .{inst});
+            x.errors.list.len = 0;
+            return e;
+        };
     }
 
     pub fn setDecalMode(self: *Self, mode: DecalMode) void {
@@ -1302,12 +1307,12 @@ pub const LinuxImpl = struct {
         }, 0, @intCast(u32, decal.vertices.len));
     }
 
-    pub fn displayFrame(self: *Self) !void {
-        try self.x_state.display.swapBuffers(self.x_state.window);
+    pub fn displayFrame(self: *Self) void {
+        self.x_state.display.swapBuffers(self.x_state.window);
     }
 
-    pub fn setWindowTitle(self: *Self, title: [:0]const u8) !void {
-        try self.x_state.display.storeName(self.x_state.window, title);
+    pub fn setWindowTitle(self: *Self, title: [:0]const u8) void {
+        self.x_state.display.storeName(self.x_state.window, title);
     }
 
     pub fn mapKey(val: x.c.KeySym) ?Key {

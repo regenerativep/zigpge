@@ -1,5 +1,5 @@
 const std = @import("std");
-const assert = std.debug.assert;
+//const assert = std.debug.assert;
 
 // Any X function that returns 0 means there is an error.
 // Free/destroy/etc functions here, instead of returning an error, will panic instead
@@ -7,6 +7,7 @@ const assert = std.debug.assert;
 pub const c = @cImport({
     @cInclude("X.h");
     @cInclude("Xlib.h");
+    @cInclude("Xproto.h");
     @cInclude("keysymdef.h");
     @cInclude("gl.h");
     @cInclude("glx.h");
@@ -14,132 +15,285 @@ pub const c = @cImport({
 
 const g = @import("gl.zig");
 
-pub const XError = error{
-    XBadRequest,
-    XBadValue,
-    XBadWindow,
-    XBadPixmap,
-    XBadAtom,
-    XBadCursor,
-    XBadFont,
-    XBadMatch,
-    XBadDrawable,
-    XBadAccess,
-    XBadAlloc,
-    XBadColor,
-    XBadGC,
-    XBadIDChoice,
-    XBadName,
-    XBadLength,
-    XBadImplementation,
-};
-pub const GlxError = error{
-    GlxBadContext,
-    GlxBadContextState,
-    GlxBadDrawable,
-    GlxBadPixmap,
-    GlxBadContextTag,
-    GlxBadCurrentWindow,
-    GlxBadRenderRequest,
-    GlxBadLargeRequest,
-    GlxUnsupportedPrivateRequest,
-    GlxBadFBConfig,
-    GlxBadPbuffer,
-    GlxBadCurrentDrawable,
-    GlxBadWindow,
-};
-
-fn getErrorFromCode(error_code: u8) ?(XError || GlxError) {
-    const code = if (error_code > 0) error_code - 1 else return null;
-    const errors = [_]XError{
-        error.XBadRequest,
-        error.XBadValue,
-        error.XBadWindow,
-        error.XBadPixmap,
-        error.XBadAtom,
-        error.XBadCursor,
-        error.XBadFont,
-        error.XBadMatch,
-        error.XBadDrawable,
-        error.XBadAccess,
-        error.XBadAlloc,
-        error.XBadColor,
-        error.XBadGC,
-        error.XBadIDChoice,
-        error.XBadName,
-        error.XBadLength,
-        error.XBadImplementation,
-    };
-    if (code < errors.len) {
-        return errors[code];
-    }
-    if (glx_base_error) |base_error| {
-        if (code >= base_error) {
-            const glx_errors = [_]GlxError{
-                error.GlxBadContext,
-                error.GlxBadContextState,
-                error.GlxBadDrawable,
-                error.GlxBadPixmap,
-                error.GlxBadContextTag,
-                error.GlxBadCurrentWindow,
-                error.GlxBadRenderRequest,
-                error.GlxBadLargeRequest,
-                error.GlxUnsupportedPrivateRequest,
-                error.GlxBadFBConfig,
-                error.GlxBadPbuffer,
-                error.GlxBadCurrentDrawable,
-                error.GlxBadWindow,
-            };
-            const be = @intCast(usize, base_error);
-            if (code < be + glx_errors.len) {
-                return glx_errors[code - be];
-            }
-        }
-    }
-    return null;
-}
-
 /// returns if multithreading allowed
 pub fn initThreads() bool {
     return c.XInitThreads() != 0;
 }
 
-var x11_error_event: ?*c.XErrorEvent = null;
-var x11_error: ?(GlxError || XError) = null;
-pub fn getError() ?(GlxError || XError) {
-    const e = x11_error;
-    x11_error = null;
-    return e;
-}
+pub const errors = struct {
+    pub const ErrorCode = enum {
+        xBadRequest,
+        xBadValue,
+        xBadWindow,
+        xBadPixmap,
+        xBadAtom,
+        xBadCursor,
+        xBadFont,
+        xBadMatch,
+        xBadDrawable,
+        xBadAccess,
+        xBadAlloc,
+        xBadColor,
+        xBadGC,
+        xBadIDChoice,
+        xBadName,
+        xBadLength,
+        xBadImplementation,
 
-fn xErrorHandler(display: ?*c.Display, event: ?*c.XErrorEvent) callconv(.C) c_int {
-    _ = display;
-    x11_error_event = event orelse return 0;
-    x11_error = getErrorFromCode(event.?.error_code) orelse return 0;
-    std.log.err("X11 error: {any}", .{x11_error.?});
-    return 0;
-}
+        glxBadContext,
+        glxBadContextState,
+        glxBadDrawable,
+        glxBadPixmap,
+        glxBadContextTag,
+        glxBadCurrentWindow,
+        glxBadRenderRequest,
+        glxBadLargeRequest,
+        glxUnsupportedPrivateRequest,
+        glxBadFBConfig,
+        glxBadPbuffer,
+        glxBadCurrentDrawable,
+        glxBadWindow,
 
-/// mandatory to call this in the beginning for zig-like error handling
-/// (otherwise functions should just panic on error)
-pub fn initErrorHandler() void {
-    _ = c.XSetErrorHandler(xErrorHandler);
-}
+        pub fn from(error_code: u8) ?ErrorCode {
+            const code = if (error_code > 0) error_code - 1 else return null;
+            const xerrors = [_]ErrorCode{
+                .xBadRequest,
+                .xBadValue,
+                .xBadWindow,
+                .xBadPixmap,
+                .xBadAtom,
+                .xBadCursor,
+                .xBadFont,
+                .xBadMatch,
+                .xBadDrawable,
+                .xBadAccess,
+                .xBadAlloc,
+                .xBadColor,
+                .xBadGC,
+                .xBadIDChoice,
+                .xBadName,
+                .xBadLength,
+                .xBadImplementation,
+            };
+            if (code < xerrors.len) {
+                return xerrors[code];
+            }
+            if (glx_base_error) |base_error| {
+                if (code >= base_error) {
+                    const glx_errors = [_]ErrorCode{
+                        .glxBadContext,
+                        .glxBadContextState,
+                        .glxBadDrawable,
+                        .glxBadPixmap,
+                        .glxBadContextTag,
+                        .glxBadCurrentWindow,
+                        .glxBadRenderRequest,
+                        .glxBadLargeRequest,
+                        .glxUnsupportedPrivateRequest,
+                        .glxBadFBConfig,
+                        .glxBadPbuffer,
+                        .glxBadCurrentDrawable,
+                        .glxBadWindow,
+                    };
+                    const be = @intCast(usize, base_error);
+                    if (code < be + glx_errors.len) {
+                        return glx_errors[code - be];
+                    }
+                }
+            }
+            return null;
+        }
+    };
 
-// please i just want to receive glx errors
-var glx_base_error: ?c_int = null;
-var glx_base_event: ?c_int = null;
+    pub const RequestCode = enum(u8) {
+        none = 0,
+        createWindow = c.X_CreateWindow,
+        changeWindowAttributes = c.X_ChangeWindowAttributes,
+        getWindowAttributes = c.X_GetWindowAttributes,
+        destroyWindow = c.X_DestroyWindow,
+        destroySubwindows = c.X_DestroySubwindows,
+        changeSaveSet = c.X_ChangeSaveSet,
+        reparentWindow = c.X_ReparentWindow,
+        mapWindow = c.X_MapWindow,
+        mapSubwindows = c.X_MapSubwindows,
+        unmapWindow = c.X_UnmapWindow,
+        unmapSubwindows = c.X_UnmapSubwindows,
+        configureWindow = c.X_ConfigureWindow,
+        circulateWindow = c.X_CirculateWindow,
+        getGeometry = c.X_GetGeometry,
+        queryTree = c.X_QueryTree,
+        internAtom = c.X_InternAtom,
+        getAtomName = c.X_GetAtomName,
+        changeProperty = c.X_ChangeProperty,
+        deleteProperty = c.X_DeleteProperty,
+        getProperty = c.X_GetProperty,
+        listProperties = c.X_ListProperties,
+        setSelectionOwner = c.X_SetSelectionOwner,
+        getSelectionOwner = c.X_GetSelectionOwner,
+        convertSelection = c.X_ConvertSelection,
+        sendEvent = c.X_SendEvent,
+        grabPointer = c.X_GrabPointer,
+        ungrabPointer = c.X_UngrabPointer,
+        grabButton = c.X_GrabButton,
+        ungrabButton = c.X_UngrabButton,
+        changeActivePointerGrab = c.X_ChangeActivePointerGrab,
+        grabKeyboard = c.X_GrabKeyboard,
+        ungrabKeyboard = c.X_UngrabKeyboard,
+        grabKey = c.X_GrabKey,
+        ungrabKey = c.X_UngrabKey,
+        allowEvents = c.X_AllowEvents,
+        grabServer = c.X_GrabServer,
+        ungrabServer = c.X_UngrabServer,
+        queryPointer = c.X_QueryPointer,
+        getMotionEvents = c.X_GetMotionEvents,
+        translateCoords = c.X_TranslateCoords,
+        warpPointer = c.X_WarpPointer,
+        setInputFocus = c.X_SetInputFocus,
+        getInputFocus = c.X_GetInputFocus,
+        queryKeymap = c.X_QueryKeymap,
+        openFont = c.X_OpenFont,
+        closeFont = c.X_CloseFont,
+        queryFont = c.X_QueryFont,
+        queryTextExtents = c.X_QueryTextExtents,
+        listFonts = c.X_ListFonts,
+        listFontsWithInfo = c.X_ListFontsWithInfo,
+        setFontPath = c.X_SetFontPath,
+        getFontPath = c.X_GetFontPath,
+        createPixmap = c.X_CreatePixmap,
+        freePixmap = c.X_FreePixmap,
+        createGC = c.X_CreateGC,
+        changeGC = c.X_ChangeGC,
+        copyGC = c.X_CopyGC,
+        setDashes = c.X_SetDashes,
+        setClipRectangles = c.X_SetClipRectangles,
+        freeGC = c.X_FreeGC,
+        clearArea = c.X_ClearArea,
+        copyArea = c.X_CopyArea,
+        copyPlane = c.X_CopyPlane,
+        polyPoint = c.X_PolyPoint,
+        polyLine = c.X_PolyLine,
+        polySegment = c.X_PolySegment,
+        polyRectangle = c.X_PolyRectangle,
+        polyArc = c.X_PolyArc,
+        fillPoly = c.X_FillPoly,
+        polyFillRectangle = c.X_PolyFillRectangle,
+        polyFillArc = c.X_PolyFillArc,
+        putImage = c.X_PutImage,
+        getImage = c.X_GetImage,
+        polyText8 = c.X_PolyText8,
+        polyText16 = c.X_PolyText16,
+        imageText8 = c.X_ImageText8,
+        imageText16 = c.X_ImageText16,
+        createColormap = c.X_CreateColormap,
+        freeColormap = c.X_FreeColormap,
+        copyColormapAndFree = c.X_CopyColormapAndFree,
+        installColormap = c.X_InstallColormap,
+        uninstallColormap = c.X_UninstallColormap,
+        listInstalledColormaps = c.X_ListInstalledColormaps,
+        allocColor = c.X_AllocColor,
+        allocNamedColor = c.X_AllocNamedColor,
+        allocColorCells = c.X_AllocColorCells,
+        allocColorPlanes = c.X_AllocColorPlanes,
+        freeColors = c.X_FreeColors,
+        storeColors = c.X_StoreColors,
+        storeNamedColor = c.X_StoreNamedColor,
+        queryColors = c.X_QueryColors,
+        lookupColor = c.X_LookupColor,
+        createCursor = c.X_CreateCursor,
+        createGlyphCursor = c.X_CreateGlyphCursor,
+        freeCursor = c.X_FreeCursor,
+        recolorCursor = c.X_RecolorCursor,
+        queryBestSize = c.X_QueryBestSize,
+        queryExtension = c.X_QueryExtension,
+        listExtensions = c.X_ListExtensions,
+        changeKeyboardMapping = c.X_ChangeKeyboardMapping,
+        getKeyboardMapping = c.X_GetKeyboardMapping,
+        changeKeyboardControl = c.X_ChangeKeyboardControl,
+        getKeyboardControl = c.X_GetKeyboardControl,
+        bell = c.X_Bell,
+        changePointerControl = c.X_ChangePointerControl,
+        getPointerControl = c.X_GetPointerControl,
+        setScreenSaver = c.X_SetScreenSaver,
+        getScreenSaver = c.X_GetScreenSaver,
+        changeHosts = c.X_ChangeHosts,
+        listHosts = c.X_ListHosts,
+        setAccessControl = c.X_SetAccessControl,
+        setCloseDownMode = c.X_SetCloseDownMode,
+        killClient = c.X_KillClient,
+        rotateProperties = c.X_RotateProperties,
+        forceScreenSaver = c.X_ForceScreenSaver,
+        setPointerMapping = c.X_SetPointerMapping,
+        getPointerMapping = c.X_GetPointerMapping,
+        setModifierMapping = c.X_SetModifierMapping,
+        getModifierMapping = c.X_GetModifierMapping,
+        noOperation = c.X_NoOperation,
+        _,
+    };
 
-pub fn initGlxErrors(display: Display) bool {
-    var ber: c_int = undefined;
-    var bev: c_int = undefined;
-    const result = c.glXQueryExtension(display.inner, &ber, &bev) == c.True;
-    if (result) {
-        glx_base_error = ber;
-        glx_base_event = bev;
+    pub const ErrorInstance = struct {
+        code: ErrorCode,
+        request: RequestCode,
+
+        pub fn from(event: *c.XErrorEvent) ?ErrorInstance {
+            return ErrorInstance{
+                .code = ErrorCode.from(event.error_code) orelse return null,
+                .request = @intToEnum(
+                    RequestCode,
+                    event.request_code,
+                ),
+            };
+        }
+    };
+    pub const ErrorList = std.BoundedArray(ErrorInstance, 50); // some number
+    // TODO: should this be made thread safe?
+    pub var list = ErrorList{};
+
+    pub fn has() !void {
+        if (list.len != 0) return error.X11Error;
     }
-    return result;
-}
+
+    var previous_error_handler: c.XErrorHandler = null;
+    var our_display: ?*c.Display = null;
+
+    fn xErrorHandler(display: ?*c.Display, event: ?*c.XErrorEvent) callconv(.C) c_int {
+        if (display) |d| if (our_display) |our| if (event) |e| if (our == d) {
+            if (ErrorInstance.from(e)) |inst| {
+                if (list.len < list.buffer.len) {
+                    list.appendAssumeCapacity(inst);
+                } else {
+                    std.log.warn("unlogged Xlib error: {any}", .{inst});
+                }
+            }
+            return 0;
+        };
+        if (previous_error_handler) |prev| {
+            return prev(display, event);
+        } else {
+            return 0;
+        }
+    }
+
+    /// only call once
+    pub fn initHandler() void {
+        previous_error_handler = c.XSetErrorHandler(xErrorHandler);
+    }
+
+    var glx_base_error: ?c_int = null;
+    var glx_base_event: ?c_int = null;
+
+    /// finds glx error offset, and sets display for error filtering
+    pub fn initErrors(display: Display) bool {
+        our_display = display.inner;
+        var ber: c_int = undefined;
+        var bev: c_int = undefined;
+        const result = c.glXQueryExtension(display.inner, &ber, &bev) == c.True;
+        if (result) {
+            glx_base_error = ber;
+            glx_base_event = bev;
+        }
+        return result;
+    }
+};
 
 pub const EventMask = packed struct(c_long) {
     key_press: bool = false,
@@ -170,6 +324,9 @@ pub const EventMask = packed struct(c_long) {
     _p: u39 = 0,
 };
 
+pub fn boolToCBool(val: bool) c.Bool {
+    return if (val) c.True else c.False;
+}
 pub const Display = struct {
     inner: *c.Display,
 
@@ -180,11 +337,16 @@ pub const Display = struct {
         return null;
     }
     pub fn close(self: Display) void {
-        assert(c.XCloseDisplay(self.inner) != 0);
+        _ = c.XCloseDisplay(self.inner);
     }
     pub fn setWMProtocols(self: Display, window: Window, protocols: []Atom) !void {
-        if (c.XSetWMProtocols(self.inner, window.inner, protocols.ptr, @intCast(c_int, protocols.len)) == 0)
-            return getError().?;
+        if (c.XSetWMProtocols(
+            self.inner,
+            window.inner,
+            protocols.ptr,
+            @intCast(c_int, protocols.len),
+        ) == 0)
+            try errors.has();
     }
     pub fn sendEvent(
         self: Display,
@@ -196,20 +358,18 @@ pub const Display = struct {
         if (c.XSendEvent(
             self.inner,
             window.inner,
-            @boolToInt(propagate),
+            boolToCBool(propagate),
             @bitCast(c_long, event_mask),
             event,
-        ) == 0) {
-            return getError().?;
-        }
+        ) == 0)
+            try errors.has();
     }
-    pub fn flush(self: Display) !void {
-        if (c.XFlush(self.inner) == 0) return getError().?;
+    pub fn flush(self: Display) void {
+        _ = c.XFlush(self.inner);
     }
     pub fn makeCurrent(self: Display, window: Window, context: Context) !void {
-        if (c.glXMakeCurrent(self.inner, window.inner, context.inner) == 0) {
-            return getError().?;
-        }
+        if (c.glXMakeCurrent(self.inner, window.inner, context.inner) == 0)
+            try errors.has();
     }
     // assume that XPending will not return a negative value
     pub fn pending(display: Display) u32 {
@@ -227,14 +387,12 @@ pub const Display = struct {
         return if (display.pending() > 0) display.nextEvent() else null;
     }
 
-    pub fn swapBuffers(display: Display, window: Window) !void {
+    pub fn swapBuffers(display: Display, window: Window) void {
         c.glXSwapBuffers(display.inner, window.inner);
-        if (getError()) |e| return e;
     }
 
-    pub fn storeName(display: Display, window: Window, s: [:0]const u8) !void {
-        if (c.XStoreName(display.inner, window.inner, s.ptr) == 0)
-            return getError().?;
+    pub fn storeName(display: Display, window: Window, s: [:0]const u8) void {
+        _ = c.XStoreName(display.inner, window.inner, s.ptr);
     }
 
     pub fn defaultRootWindow(self: Display) Window {
@@ -348,24 +506,22 @@ pub const Window = struct {
             @bitCast(c_ulong, value_mask),
             &_attributes,
         );
-        if (getError()) |e| return e;
+        try errors.has();
         return Window{ .inner = window };
     }
     pub fn unmap(self: Window, display: Display) void {
-        assert(c.XUnmapWindow(display.inner, self.inner) != 0);
+        _ = c.XUnmapWindow(display.inner, self.inner);
     }
-    pub fn map(self: Window, display: Display) !void {
-        if (c.XMapWindow(display.inner, self.inner) == 0) return getError().?;
-    }
-    pub fn storeName(self: Window, display: Display, name: [:0]const u8) !void {
-        if (c.XStoreName(display.inner, self.inner, name.ptr) == 0) return getError().?;
+    pub fn map(self: Window, display: Display) void {
+        _ = c.XMapWindow(display.inner, self.inner);
     }
     pub fn destroy(self: Window, display: Display) void {
-        assert(c.XDestroyWindow(display.inner, self.inner) != 0);
+        _ = c.XDestroyWindow(display.inner, self.inner);
     }
     pub fn getAttributes(self: Window, display: Display) !c.XWindowAttributes {
         var attr: c.XWindowAttributes = undefined;
-        if (c.XGetWindowAttributes(display.inner, self.inner, &attr) == 0) return getError().?;
+        if (c.XGetWindowAttributes(display.inner, self.inner, &attr) == 0)
+            try errors.has();
         return attr;
     }
 };
@@ -378,12 +534,12 @@ pub const Colormap = struct {
         all = c.AllocAll,
     }) !Colormap {
         const colormap = c.XCreateColormap(display.inner, window.inner, visual.inner, @enumToInt(alloc));
-        if (getError()) |e| return e;
+        try errors.has();
         return Colormap{ .inner = colormap };
     }
 
     pub fn free(self: Colormap, display: Display) void {
-        assert(c.XFreeColormap(display.inner, self.inner) != 0);
+        _ = c.XFreeColormap(display.inner, self.inner);
     }
 };
 
@@ -530,7 +686,7 @@ pub const VisualInfo = struct {
     }
 
     pub fn deinit(self: *VisualInfo) void {
-        assert(c.XFree(self.inner) != 0);
+        _ = c.XFree(self.inner);
         self.* = undefined;
     }
 };
@@ -542,8 +698,8 @@ pub const Visual = struct {
 pub const Atom = c.Atom;
 
 pub fn internAtom(display: Display, name: [:0]const u8, only_if_exists: bool) !Atom {
-    const atom = c.XInternAtom(display.inner, name.ptr, @boolToInt(only_if_exists));
-    if (getError()) |e| return e;
+    const atom = c.XInternAtom(display.inner, name.ptr, boolToCBool((only_if_exists)));
+    try errors.has();
     return atom;
 }
 
@@ -552,13 +708,22 @@ pub const Context = struct {
 
     pub const None = Context{ .inner = null };
 
-    pub fn create(display: Display, visual_info: VisualInfo, share_list: Context, direct: bool) !Context {
-        const ctx = c.glXCreateContext(display.inner, visual_info.inner, share_list.inner, @boolToInt(direct));
-        if (getError()) |e| return e;
+    pub fn create(
+        display: Display,
+        visual_info: VisualInfo,
+        share_list: Context,
+        direct: bool,
+    ) !Context {
+        const ctx = c.glXCreateContext(
+            display.inner,
+            visual_info.inner,
+            share_list.inner,
+            boolToCBool(direct),
+        );
+        try errors.has();
         return Context{ .inner = ctx };
     }
     pub fn destroy(self: Context, display: Display) void {
         c.glXDestroyContext(display.inner, self.inner);
-        assert(getError() == null); // will error if `self` is bad
     }
 };
