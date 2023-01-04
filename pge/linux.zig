@@ -27,6 +27,7 @@ pub const XState = struct {
         window_pos: V2D,
         window_size: *V2D,
         full_screen: bool,
+        name: [:0]const u8,
     ) !XState {
         if (!x.initThreads())
             std.log.warn("X says it doesn't support multithreading", .{});
@@ -75,7 +76,7 @@ pub const XState = struct {
         try display.setWMProtocols(window, @as(*[1]x.Atom, &wm_delete));
 
         window.map(display);
-        display.storeName(window, "zig pge"); // TODO: make this app_name? or dont do this here?
+        display.storeName(window, name);
 
         if (full_screen) {
             const wm_state = try x.internAtom(display, "_NET_WM_STATE", false);
@@ -157,8 +158,13 @@ pub const ge = g.Extensions(.{
 });
 const Self = @This();
 
-pub fn init(alloc: Allocator, state: *EngineState) !Self {
-    var x_state = try XState.init(.{ .x = 30, .y = 30 }, &state.window_size, state.full_screen);
+pub fn init(alloc: Allocator, state: *EngineState, name: [:0]const u8) !Self {
+    var x_state = try XState.init(
+        .{ .x = 30, .y = 30 },
+        &state.window_size,
+        state.full_screen,
+        name,
+    );
     errdefer x_state.deinit();
 
     state.updateViewport();

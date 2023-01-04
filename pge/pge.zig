@@ -153,7 +153,7 @@ pub const VF2D = V2(f32);
 /// Engine state. Everything here is visible by the user
 pub const EngineState = struct {
     /// Name of the application. Appears in the title of the window
-    app_name: []const u8 = "pge game",
+    app_name: [:0]const u8 = "pge game",
     /// Size of the screen in engine pixels
     screen_size: V2D,
     inv_screen_size: VF2D,
@@ -218,7 +218,7 @@ pub const EngineState = struct {
     /// Initializes general engine
     pub fn init(
         alloc: Allocator,
-        name: []const u8,
+        name: [:0]const u8,
         pixel_size: V2D,
         screen_size: V2D,
     ) Self {
@@ -350,7 +350,19 @@ pub const EngineState = struct {
             }
         }
     }
+
     pub fn drawDecal(
+        self: *Self,
+        decal: *Decal,
+        pos: VF2D,
+        scale: VF2D,
+        tint: Pixel,
+    ) void {
+        drawDecalE(self, decal, pos, scale, tint) catch |e|
+            std.log.warn("failed to draw decal: {any}", .{e});
+    }
+
+    pub fn drawDecalE(
         self: *Self,
         decal: *Decal,
         pos: VF2D,
@@ -514,13 +526,12 @@ pub fn PixelGameEngine(comptime UserGame: type) type {
         /// Initializes the engine.
         pub fn init(
             alloc: Allocator,
-            name: []const u8,
-            game: UserGame,
+            name: [:0]const u8,
             pixel_size: V2D,
             screen_size: V2D,
         ) !Self {
             var state = EngineState.init(alloc, name, pixel_size, screen_size);
-            var impl = try Impl.init(alloc, &state);
+            var impl = try Impl.init(alloc, &state, name);
             errdefer impl.deinit(alloc);
 
             state.font_sheet = constructFontSheet(alloc) catch |e| blk: {
@@ -528,35 +539,34 @@ pub fn PixelGameEngine(comptime UserGame: type) type {
                 break :blk null;
             };
 
-            return Self{
-                .impl = impl,
-                .game = game,
-                .state = state,
-            };
-        }
-
-        /// Starts the engine loop.
-        pub fn start(self: *Self, alloc: Allocator) !void {
-            if (self.state.layers.items.len == 0) {
+            // NOTE: `state` is not pinned.. dont make references to it before main loop
+            if (UserGame.userInit(alloc, &state)) |game| {
+                var self = Self{
+                    .impl = impl,
+                    .game = game,
+                    .state = state,
+                };
                 _ = self.state.createLayer(alloc) catch |e| {
                     std.log.err("Failed to create initial draw layer: {any}", .{e});
                     return e;
                 };
                 self.state.layers.items[0].show = true;
                 self.state.layers.items[0].update = true;
+                return self;
+            } else {
+                return error.UserInitializationFailure;
             }
+        }
 
-            if (@hasDecl(UserGame, "onUserCreate")) // TODO: should we move this to the `init` function?
-                if (!self.game.onUserCreate(alloc, &self.state)) self.state.active.store(false, .Monotonic);
-
-            while (self.state.active.load(.Monotonic)) {
-                self.update(alloc) catch |e| {
+        /// Starts the engine loop.
+        pub fn start(self: *Self, alloc: Allocator) !void {
+            while (self.state.active.load(.Monotonic))
+                self.update(alloc) catch |e|
                     std.log.warn("Core update error: {any}", .{e});
-                };
-            }
 
-            if (@hasDecl(UserGame, "onUserDestroy"))
-                self.game.onUserDestroy(alloc, &self.state);
+            // TODO: should this be moved to `deinit`?
+            if (@hasDecl(UserGame, "userDeinit"))
+                self.game.userDeinit(alloc, &self.state);
 
             // TODO: thread cleanup?
         }
@@ -592,8 +602,8 @@ pub fn PixelGameEngine(comptime UserGame: type) type {
 
             // TODO: text entry
 
-            comptime assert(@hasDecl(UserGame, "onUserUpdate"));
-            if (!self.game.onUserUpdate(alloc, &self.state, fElapsed))
+            comptime assert(@hasDecl(UserGame, "userUpdate"));
+            if (!self.game.userUpdate(alloc, &self.state, fElapsed))
                 self.state.active.store(false, .Monotonic);
 
             self.state.old_key_state = self.state.key_state;
