@@ -20,18 +20,20 @@ const pge = @import("pge");
 pub const Game = struct {
     rand_backend: std.rand.DefaultPrng,
 
-    /// User creates their state here.
-    /// Returning null means to cancel engine initialization
+    /// User initializes their state here.
+    /// Returning false means to cancel engine initialization
     pub fn userInit(
+        self: *Game,
         alloc: std.mem.Allocator,
         engine: *pge.EngineState,
-    ) ?Game {
+    ) bool {
         _ = alloc;
         _ = engine;
 
-        return Game{
+        self.* = Game{
             .rand_backend = std.rand.DefaultPrng.init(0),
         };
+        return true;
     }
 
     /// Called every frame. Update game state and draw here
@@ -88,7 +90,7 @@ pub fn main() !void {
 ## Engine
 
 - user game state:
-    - `userInit(alloc: Allocator, engine: *EngineState)`: meant for user initialization of their game state
+    - `userInit(game: *UserGame, alloc: Allocator, engine: *EngineState)`: meant for user initialization of their game state. provided game state pointed to by `game` is undefined. using initialization with a pointer, instead of initialization by returning, is important since user may want to make references to the game state (ex. decal initialization)
     - `userUpdate(game: *UserGame, alloc: Allocator, engine: *EngineState, elapsed_time: f32)`: called every frame. return false to stop engine
     - `userDeinit(game: *UserGame, alloc: Allocator, engine: *EngineState)` optional deinitialization function
 - `Key`: possible key presses

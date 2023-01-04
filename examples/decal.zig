@@ -3,10 +3,14 @@ const pge = @import("pge");
 
 /// The user's game state.
 pub const Game = struct {
+    var my_sprite_data = [1]pge.Pixel{pge.Pixel.Red} ** 64;
     rand_backend: std.rand.DefaultPrng,
 
-    /// User initializes their state here.
-    /// Returning false means to cancel engine initialization
+    my_sprite: pge.Sprite,
+    my_decal: pge.Decal,
+
+    /// User creates their state here.
+    /// Returning null means to cancel engine initialization
     pub fn userInit(
         self: *Game,
         alloc: std.mem.Allocator,
@@ -17,7 +21,11 @@ pub const Game = struct {
 
         self.* = Game{
             .rand_backend = std.rand.DefaultPrng.init(0),
+            .my_sprite = undefined,
+            .my_decal = undefined,
         };
+        self.my_sprite = .{ .width = 8, .height = 8, .data = &my_sprite_data };
+        self.my_decal = pge.Decal.init(&self.my_sprite, false, true) catch return false;
         return true;
     }
 
@@ -46,6 +54,14 @@ pub const Game = struct {
                 } });
             }
         }
+
+        //std.log.info("mouse pos: {any}", .{engine.mouse_pos});
+        engine.drawDecal(
+            &self.my_decal,
+            .{ .x = @intToFloat(f32, engine.mouse_pos.x), .y = @intToFloat(f32, engine.mouse_pos.y) },
+            pge.VF2D.One,
+            pge.Pixel.White,
+        );
 
         return true;
     }

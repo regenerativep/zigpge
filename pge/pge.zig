@@ -538,28 +538,28 @@ pub fn PixelGameEngine(comptime UserGame: type) type {
                 std.log.warn("Failed to construct font sheet: {any}", .{e});
                 break :blk null;
             };
+            return Self{
+                .impl = impl,
+                .game = undefined,
+                .state = state,
+            };
+        }
 
-            // NOTE: `state` is not pinned.. dont make references to it before main loop
-            if (UserGame.userInit(alloc, &state)) |game| {
-                var self = Self{
-                    .impl = impl,
-                    .game = game,
-                    .state = state,
-                };
+        /// Starts the engine loop.
+        pub fn start(self: *Self, alloc: Allocator) !void {
+            if (self.state.layers.items.len == 0) {
                 _ = self.state.createLayer(alloc) catch |e| {
                     std.log.err("Failed to create initial draw layer: {any}", .{e});
                     return e;
                 };
                 self.state.layers.items[0].show = true;
                 self.state.layers.items[0].update = true;
-                return self;
-            } else {
-                return error.UserInitializationFailure;
             }
-        }
 
-        /// Starts the engine loop.
-        pub fn start(self: *Self, alloc: Allocator) !void {
+            // userInit must run after user game state isn't moving around anymore
+            if (!UserGame.userInit(&self.game, alloc, &self.state))
+                return error.UserInitializationFailure;
+
             while (self.state.active.load(.Monotonic))
                 self.update(alloc) catch |e|
                     std.log.warn("Core update error: {any}", .{e});
@@ -632,10 +632,10 @@ pub fn PixelGameEngine(comptime UserGame: type) type {
 
             self.impl.displayFrame();
 
-            const child_alloc = self.state.arena.child_allocator;
-            self.state.arena.deinit();
-            self.state.arena = std.heap.ArenaAllocator.init(child_alloc);
-            // TODO: _ = self.state.arena.reset(.retain_capacity);
+            //const child_alloc = self.state.arena.child_allocator;
+            //self.state.arena.deinit();
+            //self.state.arena = std.heap.ArenaAllocator.init(child_alloc);
+            _ = self.state.arena.reset(.retain_capacity);
 
             const every_n_seconds: f32 = 1;
             if (self.second_count > every_n_seconds) {
