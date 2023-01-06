@@ -130,7 +130,7 @@ n_vs: ge.Shader,
 n_quad: ge.Program,
 vb_quad: ge.Buffer,
 va_quad: ge.VertexArray,
-blank_quad: pge.OwnedDecal,
+blank_quad: pge.Decal,
 
 decal_mode: pge.DecalMode = .Normal,
 
@@ -252,7 +252,7 @@ pub fn init(alloc: Allocator, state: *EngineState, name: [:0]const u8) !Self {
     updateViewport(state.view_pos, state.view_size);
 
     var blank_sprite: *Sprite = undefined;
-    var blank_quad: pge.OwnedDecal = undefined;
+    var blank_quad: pge.Decal = undefined;
     {
         // TODO: could we do OwnedDecal.initSize here?
         blank_sprite = try alloc.create(Sprite);
@@ -261,12 +261,10 @@ pub fn init(alloc: Allocator, state: *EngineState, name: [:0]const u8) !Self {
         errdefer blank_sprite.deinit(alloc);
         blank_sprite.data[0] = Pixel.White;
 
-        blank_quad = pge.OwnedDecal{
-            .inner = try pge.Decal.init(blank_sprite, false, true),
-        };
+        blank_quad = try pge.Decal.init(blank_sprite, false, true);
     }
-    errdefer blank_quad.deinit(alloc);
-    try blank_quad.inner.update(); // may be unnecessary to call this here
+    errdefer blank_quad.deinitWithSprite(alloc);
+    try blank_quad.update(); // may be unnecessary to call this here
 
     return Self{
         .x_state = x_state,
@@ -287,7 +285,7 @@ pub fn deinit(self: *Self, alloc: Allocator) void {
     self.n_quad.deinit();
     self.n_vs.deinit();
     self.n_fs.deinit();
-    self.blank_quad.deinit(alloc);
+    self.blank_quad.deinitWithSprite(alloc);
     self.x_state.deinit();
     self.* = undefined;
 }

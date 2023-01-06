@@ -181,7 +181,7 @@ pub const EngineState = struct {
     view_pos: V2D = V2D.Zero,
     view_size: VU2D = VU2D.Zero,
     last_time: i64,
-    font_sheet: ?OwnedDecal = null,
+    font_sheet: ?Decal = null,
     /// Per-frame memory allocator
     arena: std.heap.ArenaAllocator,
 
@@ -448,7 +448,7 @@ pub const EngineState = struct {
     pub const MonoCharHeight = 8;
     pub const TabLengthInSpaces = 4;
     pub fn drawString(self: *Self, pos: V2D, text: []const u8, pixel: Pixel, scale: u32) void {
-        const font = (self.font_sheet orelse return).inner.sprite;
+        const font = (self.font_sheet orelse return).sprite;
         var s = pos;
         for (text) |c| switch (c) {
             '\n' => {
@@ -527,7 +527,7 @@ pub const EngineState = struct {
 
     pub fn setDrawLayer(self: *Self, layer: usize, dirty: bool) void {
         if (layer >= self.layers.items.len) return;
-        self.draw_target = self.layers.items[layer].draw_target.inner.sprite;
+        self.draw_target = self.layers.items[layer].draw_target.sprite;
         self.layers.items[layer].update = dirty;
         self.target_layer = layer;
     }
@@ -576,15 +576,15 @@ pub const EngineState = struct {
 
     /// Creates a new layer. Returns the layer index.
     pub fn createLayer(self: *Self, alloc: Allocator) !usize {
-        var layer = Layer{ .draw_target = try OwnedDecal.initSize(alloc, self.screen_size) };
-        errdefer layer.draw_target.deinit(alloc);
+        var layer = Layer{ .draw_target = try Decal.initSize(alloc, self.screen_size) };
+        errdefer layer.draw_target.deinitWithSprite(alloc);
         const id = self.layers.items.len;
         try self.layers.append(alloc, layer);
         return id;
     }
     /// Gets the current draw target
     pub fn drawTarget(self: *Self) *Sprite {
-        return if (self.draw_target) |t| t else self.layers.items[0].draw_target.inner.sprite;
+        return if (self.draw_target) |t| t else self.layers.items[0].draw_target.sprite;
     }
 
     pub fn updateKeyState(self: *Self, key: Key, value: bool) void {
@@ -618,7 +618,7 @@ pub const EngineState = struct {
     }
 
     pub fn deinit(self: *Self, alloc: Allocator) void {
-        if (self.font_sheet) |*font_sheet| font_sheet.deinit(alloc);
+        if (self.font_sheet) |*font_sheet| font_sheet.deinitWithSprite(alloc);
         for (self.layers.items) |*layer| layer.deinit(alloc);
         self.layers.deinit(alloc);
         self.arena.deinit();
@@ -732,9 +732,9 @@ pub fn PixelGameEngine(comptime UserGame: type) type {
             self.impl.prepareDrawing();
 
             for (self.state.layers.items) |*layer| if (layer.show) {
-                layer.draw_target.inner.tex.apply() catch unreachable;
+                layer.draw_target.tex.apply() catch unreachable;
                 if (layer.update) {
-                    try layer.draw_target.inner.update();
+                    try layer.draw_target.update();
                     layer.update = false;
                 }
                 try self.impl.drawLayerQuad(layer.offset, layer.scale, layer.tint);
@@ -767,7 +767,7 @@ pub fn PixelGameEngine(comptime UserGame: type) type {
             self.second_count += fElapsed;
         }
 
-        pub fn constructFontSheet(alloc: Allocator) !OwnedDecal {
+        pub fn constructFontSheet(alloc: Allocator) !Decal {
             // would be nice not to have a blob in the source code
 
             const data = "?Q`0001oOch0o01o@F40o0<AGD4090LAGD<090@A7ch0?00O7Q`0600>00000000" ++
@@ -818,7 +818,7 @@ pub fn PixelGameEngine(comptime UserGame: type) type {
 
             // TODO: keyboard to character mapping
 
-            return OwnedDecal{ .inner = try Decal.init(sprite, false, true) };
+            return try Decal.init(sprite, false, true);
         }
         pub fn deinit(self: *Self, alloc: Allocator) void {
             self.impl.deinit(alloc);
@@ -926,7 +926,7 @@ pub const Sprite = struct {
 /// A sprite stored on the GPU.
 pub const Decal = struct {
     /// The sprite the decal depends on
-    sprite: *Sprite, // not owned by Decal (except when under OwnedDecal)
+    sprite: *Sprite, // only owned if made with `initSize`
     /// The implementation specific representation of the texture stored on the GPU
     tex: Impl.Texture,
     /// TODO: appears to be inverse width and height
@@ -943,6 +943,15 @@ pub const Decal = struct {
         try self.update();
         return self;
     }
+    /// Make a new decal and sprite with the given size.
+    /// Sprite is allocated, use deinitWithSprite to deinit
+    pub fn initSize(alloc: Allocator, size: VU2D) !Decal {
+        var sprite = try alloc.create(Sprite);
+        errdefer alloc.destroy(sprite);
+        sprite.* = try Sprite.initSize(alloc, size);
+        errdefer sprite.deinit(alloc);
+        return try Decal.init(sprite, false, true);
+    }
     /// Update the decal with any changes in the sprite
     pub fn update(self: *Decal) !void {
         const size_f = self.sprite.size.cast(f32);
@@ -957,24 +966,10 @@ pub const Decal = struct {
         self.tex.deinit();
         self.* = undefined;
     }
-};
-
-/// Decal but with deinit and init to make both the decal and sprite owned by this
-pub const OwnedDecal = struct {
-    inner: Decal,
-
-    /// Make a new decal and sprite with the given size
-    pub fn initSize(alloc: Allocator, size: VU2D) !OwnedDecal {
-        var sprite = try alloc.create(Sprite);
-        errdefer alloc.destroy(sprite);
-        sprite.* = try Sprite.initSize(alloc, size);
-        errdefer sprite.deinit(alloc);
-        return OwnedDecal{ .inner = try Decal.init(sprite, false, true) };
-    }
-    pub fn deinit(self: *OwnedDecal, alloc: Allocator) void {
-        self.inner.sprite.deinit(alloc);
-        alloc.destroy(self.inner.sprite);
-        self.inner.deinit();
+    pub fn deinitWithSprite(self: *Decal, alloc: Allocator) void {
+        self.sprite.deinit(alloc);
+        alloc.destroy(self.sprite);
+        self.deinit();
     }
 };
 
@@ -991,14 +986,14 @@ pub const Layer = struct {
     /// TODO: should this be moved to like, sprite?
     update: bool = false,
     /// The decal and sprite backing the layer
-    draw_target: OwnedDecal,
+    draw_target: Decal,
     /// List of decals to draw. Stored here to maintain draw order
     decal_draws: std.ArrayListUnmanaged(DecalInstance) = .{},
     /// Tint of the layer
     tint: Pixel = Pixel.White,
 
     pub fn deinit(self: *Layer, alloc: Allocator) void {
-        self.draw_target.deinit(alloc);
+        self.draw_target.deinitWithSprite(alloc);
         // self.decal_draws.deinit(alloc); // no need to dealloc; arena
         self.* = undefined;
     }
