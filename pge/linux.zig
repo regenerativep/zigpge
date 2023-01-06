@@ -6,6 +6,7 @@ const Allocator = std.mem.Allocator;
 const pge = @import("pge.zig");
 const V2D = pge.V2D;
 const VF2D = pge.VF2D;
+const VU2D = pge.VU2D;
 const EngineState = pge.EngineState;
 const MaxVerts = pge.MaxVerts;
 const Sprite = pge.Sprite;
@@ -25,7 +26,7 @@ pub const XState = struct {
 
     pub fn init(
         window_pos: V2D,
-        window_size: *V2D,
+        window_size: *VU2D,
         full_screen: bool,
         name: [:0]const u8,
     ) !XState {
@@ -53,8 +54,8 @@ pub const XState = struct {
             window_root,
             window_pos.x,
             window_pos.y,
-            @intCast(u32, window_size.x),
-            @intCast(u32, window_size.y),
+            window_size.x,
+            window_size.y,
             0,
             visual_info.depth(),
             .InputOutput,
@@ -100,7 +101,7 @@ pub const XState = struct {
             display.flush();
 
             const gwa = try window.getAttributes(display);
-            window_size.* = .{ .x = gwa.width, .y = gwa.height };
+            window_size.* = V2D.cast(.{ .x = gwa.width, .y = gwa.height }, u32);
         }
 
         return XState{
@@ -256,7 +257,7 @@ pub fn init(alloc: Allocator, state: *EngineState, name: [:0]const u8) !Self {
         // TODO: could we do OwnedDecal.initSize here?
         blank_sprite = try alloc.create(Sprite);
         errdefer alloc.destroy(blank_sprite);
-        blank_sprite.* = try Sprite.initSize(alloc, 1, 1);
+        blank_sprite.* = try Sprite.initSize(alloc, VU2D.One);
         errdefer blank_sprite.deinit(alloc);
         blank_sprite.data[0] = Pixel.White;
 
@@ -291,16 +292,15 @@ pub fn deinit(self: *Self, alloc: Allocator) void {
     self.* = undefined;
 }
 
-pub fn updateViewport(pos: V2D, size: V2D) void {
-    g.viewport(pos.x, pos.y, @intCast(u32, size.x), @intCast(u32, size.y));
+pub fn updateViewport(pos: V2D, size: VU2D) void {
+    g.viewport(pos.x, pos.y, size.x, size.y);
 }
 
 pub const Texture = struct {
     inner: g.Texture,
 
-    pub fn init(width: u32, height: u32, filter: bool, clamp: bool) !Texture {
-        _ = width;
-        _ = height;
+    pub fn init(size: VU2D, filter: bool, clamp: bool) !Texture {
+        _ = size;
         var tex = g.Texture.init();
         errdefer tex.deinit();
         tex.bind(.TwoD);
@@ -331,8 +331,8 @@ pub const Texture = struct {
             .TwoD,
             0,
             .RGBA,
-            @intCast(u32, sprite.width),
-            @intCast(u32, sprite.height),
+            sprite.size.x,
+            sprite.size.y,
             0,
             .RGBA,
             .UnsignedByte,
@@ -342,7 +342,7 @@ pub const Texture = struct {
 
     pub fn read(tex: Texture, sprite: *Sprite) void {
         _ = tex;
-        g.readPixels(0, 0, @intCast(u32, sprite.width), @intCast(u32, sprite.height), .RGBA, .UnsignedByte, sprite.data.ptr);
+        g.readPixels(0, 0, sprite.size.x, sprite.size.y, .RGBA, .UnsignedByte, sprite.data.ptr);
     }
 };
 
@@ -365,12 +365,12 @@ pub fn handleSystemEvent(self: *Self, p: *EngineState) !void {
             switch (xev.type) {
                 x.c.Expose => {
                     const attr = try self.x_state.window.getAttributes(self.x_state.display); // should be no error
-                    p.updateWindowSize(.{ .x = attr.width, .y = attr.height });
+                    p.updateWindowSize(.{ .x = @intCast(u32, attr.width), .y = @intCast(u32, attr.height) });
                 },
                 x.c.ConfigureNotify => {
                     p.updateWindowSize(.{
-                        .x = xev.xconfigure.width,
-                        .y = xev.xconfigure.height,
+                        .x = @intCast(u32, xev.xconfigure.width),
+                        .y = @intCast(u32, xev.xconfigure.height),
                     });
                 },
                 x.c.KeyPress => {

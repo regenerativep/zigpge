@@ -9,8 +9,8 @@ pub const Game = struct {
     my_sprite: pge.Sprite,
     my_decal: pge.Decal,
 
-    /// User creates their state here.
-    /// Returning null means to cancel engine initialization
+    /// User initializes their state here.
+    /// Returning false means to cancel engine initialization
     pub fn userInit(
         self: *Game,
         alloc: std.mem.Allocator,
@@ -24,7 +24,7 @@ pub const Game = struct {
             .my_sprite = undefined,
             .my_decal = undefined,
         };
-        self.my_sprite = .{ .width = 8, .height = 8, .data = &my_sprite_data };
+        self.my_sprite = .{ .size = .{ .x = 8, .y = 8 }, .data = &my_sprite_data };
         self.my_decal = pge.Decal.init(&self.my_sprite, false, true) catch return false;
         return true;
     }
@@ -55,15 +55,37 @@ pub const Game = struct {
             }
         }
 
-        //std.log.info("mouse pos: {any}", .{engine.mouse_pos});
+        const center = pge.V2D{
+            .x = @intCast(i32, engine.screen_size.x / 2),
+            .y = @intCast(i32, engine.screen_size.y / 2),
+        };
+
+        engine.drawRect(
+            center,
+            pge.V2D.cast(.{ .x = center.x - engine.mouse_pos.x, .y = center.y - engine.mouse_pos.y }, u32),
+            pge.Pixel.Black,
+        );
+        engine.drawLine(center, engine.mouse_pos, pge.Pixel.Black);
+
+        engine.fillRect(engine.mouse_pos, pge.EngineState.getTextSize("hello world"), pge.Pixel.White);
+        engine.drawString(engine.mouse_pos, "hello world", pge.Pixel.Black, 1);
+
         engine.drawDecal(
             &self.my_decal,
-            .{ .x = @intToFloat(f32, engine.mouse_pos.x), .y = @intToFloat(f32, engine.mouse_pos.y) },
+            .{ .x = @intToFloat(f32, engine.mouse_pos.x - 16), .y = @intToFloat(f32, engine.mouse_pos.y - 16) },
             pge.VF2D.One,
             pge.Pixel.White,
         );
-
         return true;
+    }
+    pub fn userDeinit(
+        self: *Game,
+        alloc: std.mem.Allocator,
+        engine: *pge.EngineState,
+    ) void {
+        _ = engine;
+        _ = alloc;
+        self.my_decal.deinit();
     }
 };
 

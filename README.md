@@ -6,6 +6,8 @@ I change many things here, differing from the original engine.
 
 Only implemented this for X11+OpenGL3.3, and probably just missing a lot of features in general at the moment.
 
+![Engine Example](/doc/example.png)
+
 ## Example code
 
 (Also located in `src/main.zig`)
@@ -95,7 +97,7 @@ pub fn main() !void {
     - `userDeinit(game: *UserGame, alloc: Allocator, engine: *EngineState)` optional deinitialization function
 - `Key`: possible key presses
 - `MouseButton`: possible mouse presses
-- `V2D`, `VF2D`: i32 pair, f32 pair
+- `V2D`, `VF2D`, `VU2D`: i32 pair, f32 pair, u32 pair
 - `Pixel`: RGB pixel color. has color constants like `White`, `Red`, `DarkMagenta`, `Blank`
 - `Sprite`: sprite data stored in RAM
     - `width`, `height`: size of sprite
@@ -123,9 +125,12 @@ pub fn main() !void {
     - `old_mouse_state`: enum set of held mouse keys from the previous frame
     - `draw(engine: *EngineState, pos: V2D, pixel: Pixel)`: draws a single pixel
     - `drawLine(engine: *EngineState, a: V2D, b: V2D, pixel: Pixel)`: draws a line
-    - `fillRect(engine: *EngineState, tl: V2D, size: V2D, pixel: Pixel)`: draws a filled rectangle
+    - `drawRect(engine: *EngineState, tl: V2D, size: VU2D, pixel: Pixel)`: draws a rectangle outline
+    - `fillRect(engine: *EngineState, tl: V2D, size: VU2D, pixel: Pixel)`: draws a filled rectangle
     - `drawDecal(engine: *EngineState, decal: *Decal, pos: VF2D, scale: VF2D, tint: Pixel)` draws a decal. may internally allocate
     - `clear(engine: *EngineState, pixel: Pixel)`: clears screen with given color
+    - `drawString(engine: *EngineState, pos: V2D, text: []const u8, pixel: Pixel, scale: u32)`: draws text using the internal font
+    - `EngineState.getTextSize(text: []const u8)`: gets the pixel size of the text in the monospace internal font
     - `setDrawLayer(engine: *EngineState, layer: usize, dirty: bool)` sets the draw target to the specified layer. necessary for `drawDecal` to draw to a layer
     - `createLayer(engine: *EngineState, alloc: Allocator)`: creates a layer that can be drawn to. returns the layer's index.
     - `drawTarget(engine: *EngineState)` returns the current draw target
@@ -136,6 +141,6 @@ pub fn main() !void {
 - `PixelGameEngine(comptime UserGame: type)`
     - `game`: user's game state
     - `state`: engine state
-    - `init(alloc: Allocator, name: [:0]const u8, pixel_size: V2D, screen_size: V2D)`: initializes engine
+    - `init(alloc: Allocator, name: [:0]const u8, pixel_size: VU2D, screen_size: VU2D)`: initializes engine
     - `start(pge: *PixelGameEngine(UserGame), alloc: Allocator)`: starts engine game loop
 

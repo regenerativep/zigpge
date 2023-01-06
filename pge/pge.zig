@@ -143,10 +143,19 @@ pub fn V2(comptime T: type) type {
                 .y = if (value.y < lower.y) lower.y else if (value.y > upper.y) upper.y else value.y,
             };
         }
+
+        pub fn cast(value: Self, comptime Target: type) V2(Target) {
+            return .{
+                .x = math.lossyCast(Target, value.x),
+                .y = math.lossyCast(Target, value.y),
+            };
+        }
     };
 }
 /// 2D vector of i32s
 pub const V2D = V2(i32);
+/// 2D vector of u32s
+pub const VU2D = V2(u32);
 /// 2D vector of f32s
 pub const VF2D = V2(f32);
 
@@ -155,10 +164,10 @@ pub const EngineState = struct {
     /// Name of the application. Appears in the title of the window
     app_name: [:0]const u8 = "pge game",
     /// Size of the screen in engine pixels
-    screen_size: V2D,
+    screen_size: VU2D,
     inv_screen_size: VF2D,
     /// Size of each pixel in the engine
-    pixel_size: V2D = .{ .x = 1, .y = 1 },
+    pixel_size: VU2D = .{ .x = 1, .y = 1 },
     /// I am unsure of purpose. Appears to cost an extra division operation when updating viewport if enabled
     pixel_cohesion: bool = false,
     /// Whether the application is running. Atomically set to false to stop engine loop
@@ -168,9 +177,9 @@ pub const EngineState = struct {
     full_screen: bool = false,
     /// State of vsync. TODO: do not modify?
     vsync: bool = false,
-    window_size: V2D = V2D.Zero,
+    window_size: VU2D = VU2D.Zero,
     view_pos: V2D = V2D.Zero,
-    view_size: V2D = V2D.Zero,
+    view_size: VU2D = VU2D.Zero,
     last_time: i64,
     font_sheet: ?OwnedDecal = null,
     /// Per-frame memory allocator
@@ -219,11 +228,9 @@ pub const EngineState = struct {
     pub fn init(
         alloc: Allocator,
         name: [:0]const u8,
-        pixel_size: V2D,
-        screen_size: V2D,
+        pixel_size: VU2D,
+        screen_size: VU2D,
     ) Self {
-        assert(pixel_size.x > 0 and pixel_size.y > 0);
-        assert(screen_size.x > 0 and screen_size.y > 0);
         var self = Self{
             .app_name = name,
             .screen_size = undefined,
@@ -243,13 +250,12 @@ pub const EngineState = struct {
     /// Draws a single pixel
     pub fn draw(self: *Self, pos: V2D, pixel: Pixel) void {
         var target = self.drawTarget();
-        if (pos.x < 0 or pos.y < 0 or pos.x >= target.width or pos.y >= target.height) return;
-        const x = @intCast(u32, pos.x);
-        const y = @intCast(u32, pos.y);
-        self.drawUnchecked(target, x, y, pixel);
+        if (pos.x < 0 or pos.y < 0 or pos.x >= target.size.x or pos.y >= target.size.y) return;
+        const u_pos = pos.cast(u32);
+        self.drawUnchecked(target, u_pos.x, u_pos.y, pixel);
     }
     /// Draws a single pixel.
-    /// Requires x < target.width, y < target.height
+    /// Requires x < target.size.x, y < target.size.y
     pub fn drawUnchecked(self: *Self, target: *Sprite, x: u32, y: u32, pixel: Pixel) void {
         switch (self.pixel_mode) {
             .Normal => target.data[target.pixelIndex(x, y)] = pixel,
@@ -257,7 +263,7 @@ pub const EngineState = struct {
                 if (pixel.c.a == 255) target.data[target.pixelIndex(x, y)] = pixel;
             },
             .Alpha => {
-                const d = target.getPixel(x, y);
+                const d = target.data[target.pixelIndex(x, y)];
                 const a = (@intToFloat(f32, pixel.c.a) / 255.0) / self.blend_factor;
                 const c = 1.0 - a;
                 target.data[target.pixelIndex(x, y)] = Pixel{ .c = .{
@@ -276,8 +282,8 @@ pub const EngineState = struct {
 
         // TODO: if we clip a and b to screen, then we can use drawUnchecked
 
-        const dx1 = math.abs(dx);
-        const dy1 = math.abs(dy);
+        const dx1 = math.absInt(dx) catch return;
+        const dy1 = math.absInt(dy) catch return;
         var px = 2 * dy1 - dx1;
         var py = 2 * dx1 - dy1;
         if (dy1 <= dx1) {
@@ -325,7 +331,7 @@ pub const EngineState = struct {
                 if (py < 0) {
                     py += 2 * dx1;
                 } else {
-                    if ((dx < 0 and dy < 0) or (dx > 0 and dy > 0)) x += 1 else x += 1;
+                    if ((dx < 0 and dy < 0) or (dx > 0 and dy > 0)) x += 1 else x -= 1;
                     py += 2 * (dx1 - dy1);
                 }
                 self.draw(.{ .x = x, .y = y }, pixel);
@@ -335,49 +341,46 @@ pub const EngineState = struct {
     pub fn drawAxisAlignedLine(
         self: *Self,
         from: V2D,
-        /// negative length is not drawn
-        length: i32,
+        length: u32,
         comptime direction: enum { down, right },
         pixel: Pixel,
     ) void {
         const target = self.drawTarget();
-        const size_i = V2D{
-            .x = @intCast(i32, target.width),
-            .y = @intCast(i32, target.height),
-        };
+        const size_i = target.size.cast(i32);
         if ((from.x < 0 and from.y < 0) or from.x >= size_i.x or from.y >= size_i.y) return;
-        var pos = from.clamp(V2D.Zero, size_i);
-        var i: i32 = 0;
+        var pos = from.clamp(V2D.Zero, size_i).cast(u32);
+        var i: u32 = 0;
         while (i <= length and switch (direction) {
             .down => pos.y < size_i.y,
             .right => pos.x < size_i.x,
         }) : (i += 1) {
-            self.drawUnchecked(target, @intCast(u32, pos.x), @intCast(u32, pos.y), pixel);
+            self.drawUnchecked(target, pos.x, pos.y, pixel);
             switch (direction) {
                 .down => pos.y += 1,
                 .right => pos.x += 1,
             }
         }
     }
-    pub fn drawRect(self: *Self, tl: V2D, size: V2D, pixel: Pixel) void {
+    pub fn drawRect(self: *Self, tl: V2D, size: VU2D, pixel: Pixel) void {
         self.drawAxisAlignedLine(tl, size.x, .right, pixel);
         self.drawAxisAlignedLine(tl, size.y, .down, pixel);
-        self.drawAxisAlignedLine(.{ .x = tl.x + size.x, .y = tl.y }, size.y, .down, pixel);
-        self.drawAxisAlignedLine(.{ .x = tl.x, .y = tl.y + size.y }, size.x, .right, pixel);
+        self.drawAxisAlignedLine(.{ .x = tl.x + @intCast(i32, size.x), .y = tl.y }, size.y, .down, pixel);
+        self.drawAxisAlignedLine(.{ .x = tl.x, .y = tl.y + @intCast(i32, size.y) }, size.x, .right, pixel);
     }
     /// Draws a filled rectangle with the top left location and the rectangle size.
-    pub fn fillRect(self: *Self, tl: V2D, size: V2D, pixel: Pixel) void {
+    pub fn fillRect(self: *Self, tl: V2D, size: VU2D, pixel: Pixel) void {
         const target = self.drawTarget();
-        const size_i = V2D{
-            .x = @intCast(i32, target.width),
-            .y = @intCast(i32, target.height),
-        };
-        const tl_clamped = tl.clamp(V2D.Zero, size_i);
-        const br_clamped = V2D.clamp(.{ .x = tl.x + size.x, .y = tl.y + size.y }, V2D.Zero, size_i);
+        const t_size_i = target.size.cast(i32);
+        const tl_clamped = tl.clamp(V2D.Zero, t_size_i).cast(u32);
+        const br_clamped = V2D.clamp(
+            .{ .x = tl.x + @intCast(i32, size.x), .y = tl.y + @intCast(i32, size.y) },
+            V2D.Zero,
+            t_size_i,
+        ).cast(u32);
 
-        var i = @intCast(u32, tl_clamped.y);
+        var i = tl_clamped.y;
         while (i < br_clamped.y) : (i += 1) {
-            var j = @intCast(u32, tl_clamped.x);
+            var j = tl_clamped.x;
             while (j < br_clamped.x) : (j += 1) {
                 self.drawUnchecked(target, j, i, pixel);
             }
@@ -409,9 +412,10 @@ pub const EngineState = struct {
             .x = (pos.x * self.inv_screen_size.x) * 2.0 - 1.0,
             .y = ((pos.y * self.inv_screen_size.y) * 2.0 - 1.0) * -1.0,
         };
+        const sprite_size = decal.sprite.size.cast(f32);
         const screen_dim = VF2D{
-            .x = screen_pos.x + (2.0 * @intToFloat(f32, decal.sprite.width) * self.inv_screen_size.x * scale.x),
-            .y = screen_pos.y - (2.0 * @intToFloat(f32, decal.sprite.height) * self.inv_screen_size.y * scale.y),
+            .x = screen_pos.x + (2.0 * sprite_size.x * self.inv_screen_size.x * scale.x),
+            .y = screen_pos.y - (2.0 * sprite_size.y * self.inv_screen_size.y * scale.y),
         };
         inline for (.{
             .{ VF2D{ .x = 0.0, .y = 0.0 }, screen_pos },
@@ -462,7 +466,10 @@ pub const EngineState = struct {
                 while (i < MonoCharHeight) : (i += 1) {
                     var j: u4 = 0;
                     while (j < MonoCharWidth) : (j += 1) {
-                        if (font.getPixel(j + (font_x * MonoCharWidth), i + (font_y * MonoCharHeight)).c.r > 0) {
+                        if (font.getPixel(.{
+                            .x = j + (font_x * MonoCharWidth),
+                            .y = i + (font_y * MonoCharHeight),
+                        }).c.r > 0) {
                             var is: u32 = 0;
                             while (is < scale) : (is += 1) {
                                 var js: u32 = 0;
@@ -480,7 +487,7 @@ pub const EngineState = struct {
             },
         };
     }
-    pub fn getTextSize(text: []const u8) V2D {
+    pub fn getTextSize(text: []const u8) VU2D {
         var width: u32 = 0;
         var height: u32 = 1;
         var current_width: u32 = 0;
@@ -498,8 +505,8 @@ pub const EngineState = struct {
         if (width < current_width)
             width = current_width;
         return .{
-            .x = @intCast(i32, width * MonoCharWidth),
-            .y = @intCast(i32, height * MonoCharHeight),
+            .x = width * MonoCharWidth,
+            .y = height * MonoCharHeight,
         };
     }
 
@@ -525,56 +532,51 @@ pub const EngineState = struct {
         self.target_layer = layer;
     }
 
-    pub fn updateScreenSize(self: *Self, size: V2D) void {
+    pub fn updateScreenSize(self: *Self, size: VU2D) void {
         assert(size.x > 0 and size.y > 0);
         self.screen_size = size;
+        const size_f = size.cast(f32);
         self.inv_screen_size = .{
-            .x = 1.0 / @intToFloat(f32, size.x),
-            .y = 1.0 / @intToFloat(f32, size.y),
+            .x = 1.0 / size_f.x,
+            .y = 1.0 / size_f.y,
         };
     }
-    pub fn updateWindowSize(self: *Self, size: V2D) void {
+    pub fn updateWindowSize(self: *Self, size: VU2D) void {
         self.window_size = size;
         self.updateViewport();
     }
     pub fn updateViewport(self: *Self) void {
         if (self.pixel_cohesion) {
             self.view_size = .{
-                .x = @divTrunc(self.window_size.x, self.screen_size.x) * self.screen_size.x,
-                .y = @divTrunc(self.window_size.y, self.screen_size.y) * self.screen_size.y,
+                .x = (self.window_size.x / self.screen_size.x) * self.screen_size.x,
+                .y = (self.window_size.y / self.screen_size.y) * self.screen_size.y,
             };
         } else {
-            const prev_size = V2D{
+            const prev_size = VU2D{
                 .x = self.screen_size.x * self.pixel_size.x,
                 .y = self.screen_size.y * self.pixel_size.y,
             };
             const aspect = @intToFloat(f32, prev_size.x) / @intToFloat(f32, prev_size.y);
             self.view_size = .{
                 .x = self.window_size.x,
-                .y = @floatToInt(i32, @intToFloat(f32, self.view_size.x) / aspect),
+                .y = @floatToInt(u32, @intToFloat(f32, self.view_size.x) / aspect),
             };
             if (self.view_size.y > self.window_size.y) {
                 self.view_size = .{
-                    .x = @floatToInt(i32, @intToFloat(f32, self.window_size.y) * aspect),
+                    .x = @floatToInt(u32, @intToFloat(f32, self.window_size.y) * aspect),
                     .y = self.window_size.y,
                 };
             }
         }
-        self.view_pos = .{
-            .x = @divTrunc(self.window_size.x - self.view_size.x, 2),
-            .y = @divTrunc(self.window_size.y - self.view_size.y, 2),
-        };
+        self.view_pos = VU2D.cast(.{
+            .x = (self.window_size.x - self.view_size.x) / 2,
+            .y = (self.window_size.y - self.view_size.y) / 2,
+        }, i32);
     }
 
     /// Creates a new layer. Returns the layer index.
     pub fn createLayer(self: *Self, alloc: Allocator) !usize {
-        var layer = Layer{
-            .draw_target = try OwnedDecal.initSize(
-                alloc,
-                @intCast(u32, self.screen_size.x),
-                @intCast(u32, self.screen_size.y),
-            ),
-        };
+        var layer = Layer{ .draw_target = try OwnedDecal.initSize(alloc, self.screen_size) };
         errdefer layer.draw_target.deinit(alloc);
         const id = self.layers.items.len;
         try self.layers.append(alloc, layer);
@@ -637,8 +639,8 @@ pub fn PixelGameEngine(comptime UserGame: type) type {
         pub fn init(
             alloc: Allocator,
             name: [:0]const u8,
-            pixel_size: V2D,
-            screen_size: V2D,
+            pixel_size: VU2D,
+            screen_size: VU2D,
         ) !Self {
             var state = EngineState.init(alloc, name, pixel_size, screen_size);
             var impl = try Impl.init(alloc, &state, name);
@@ -695,14 +697,14 @@ pub fn PixelGameEngine(comptime UserGame: type) type {
             self.state.mouse_pos = .{
                 .x = math.clamp(
                     @floatToInt(i32, @intToFloat(f32, self.state.mouse_pos_cache.x - self.state.view_pos.x) /
-                        @intToFloat(f32, self.state.window_size.x - (self.state.view_pos.x * 2)) *
+                        @intToFloat(f32, @intCast(i32, self.state.window_size.x) - (self.state.view_pos.x * 2)) *
                         @intToFloat(f32, self.state.screen_size.x)),
                     0,
                     self.state.screen_size.x - 1,
                 ),
                 .y = math.clamp(
                     @floatToInt(i32, @intToFloat(f32, self.state.mouse_pos_cache.y - self.state.view_pos.y) /
-                        @intToFloat(f32, self.state.window_size.y - (self.state.view_pos.y * 2)) *
+                        @intToFloat(f32, @intCast(i32, self.state.window_size.y) - (self.state.view_pos.y * 2)) *
                         @intToFloat(f32, self.state.screen_size.y)),
                     0,
                     self.state.screen_size.y - 1,
@@ -787,11 +789,10 @@ pub fn PixelGameEngine(comptime UserGame: type) type {
 
             var sprite = try alloc.create(Sprite);
             errdefer alloc.destroy(sprite);
-            sprite.* = try Sprite.initSize(alloc, 128, 48);
+            sprite.* = try Sprite.initSize(alloc, .{ .x = 128, .y = 48 });
             errdefer sprite.deinit(alloc);
 
-            var px: u32 = 0;
-            var py: u32 = 0;
+            var p = VU2D.Zero;
             var b: usize = 0;
             while (b < data.len) : (b += 4) {
                 const P = packed struct { d: u6, c: u6, b: u6, a: u6 };
@@ -804,11 +805,11 @@ pub fn PixelGameEngine(comptime UserGame: type) type {
                 var i: math.Log2Int(u24) = 0;
                 while (i < 24) : (i += 1) {
                     const k: u8 = if (part.isSet(i)) 255 else 0;
-                    sprite.setPixel(px, py, .{ .c = .{ .r = k, .g = k, .b = k, .a = k } });
-                    py += 1;
-                    if (py == 48) {
-                        px += 1;
-                        py = 0;
+                    sprite.setPixel(p.cast(i32), .{ .c = .{ .r = k, .g = k, .b = k, .a = k } });
+                    p.y += 1;
+                    if (p.y == 48) {
+                        p.x += 1;
+                        p.y = 0;
                     }
                 }
             }
@@ -884,23 +885,19 @@ pub const Pixel = extern union {
 pub const Sprite = struct {
     pub const SampleMode = enum { Normal, Periodic, Clamp };
 
-    // TODO: use a V2(u32) ?
-    /// Width of the sprite in pixels
-    width: u32,
-    /// Height of the sprite in pixels
-    height: u32,
+    /// Size of the sprite in pixels
+    size: VU2D,
     /// Array of the pixels of the sprite.
     data: []Pixel,
 
     sample_mode: SampleMode = .Normal,
 
     /// Initializes a sprite with the given size. Pixels are Pixel.Default
-    pub fn initSize(alloc: Allocator, width: u32, height: u32) !Sprite {
-        var data = try alloc.alloc(Pixel, width * height);
+    pub fn initSize(alloc: Allocator, size: VU2D) !Sprite {
+        var data = try alloc.alloc(Pixel, size.x * size.y);
         for (data) |*b| b.* = Pixel.Default;
         return Sprite{
-            .width = width,
-            .height = height,
+            .size = size,
             .data = data,
         };
     }
@@ -910,19 +907,19 @@ pub const Sprite = struct {
     }
 
     /// Sets a specific pixel on the sprite
-    pub fn setPixel(self: *Sprite, x: u32, y: u32, pixel: Pixel) void {
-        if (x >= self.width or y >= self.height) return;
-        self.data[self.pixelIndex(x, y)] = pixel;
+    pub fn setPixel(self: *Sprite, pos: V2D, pixel: Pixel) void {
+        if (pos.x < 0 or pos.y < 0 or pos.x >= self.size.x or pos.y >= self.size.y) return;
+        self.data[self.pixelIndex(pos.x, pos.y)] = pixel;
     }
     /// Gets a specific pixel on the sprite
-    pub fn getPixel(self: *Sprite, x: u32, y: u32) Pixel {
+    pub fn getPixel(self: *Sprite, pos: V2D) Pixel {
         // TODO: sample mode?
-        assert(x < self.width and y < self.height);
-        return self.data[self.pixelIndex(x, y)];
+        assert(pos.x >= 0 and pos.y >= 0 and pos.x < self.size.x and pos.y < self.size.y);
+        return self.data[self.pixelIndex(pos.x, pos.y)];
     }
 
-    pub inline fn pixelIndex(self: *Sprite, x: u32, y: u32) usize {
-        return y * self.width + x;
+    pub inline fn pixelIndex(self: *Sprite, x: anytype, y: anytype) usize {
+        return (@intCast(usize, y) * self.size.x) + @intCast(usize, x);
     }
 };
 
@@ -940,7 +937,7 @@ pub const Decal = struct {
     pub fn init(sprite: *Sprite, filter: bool, clamp: bool) !Decal {
         var self = Decal{
             .sprite = sprite,
-            .tex = try Impl.Texture.init(sprite.width, sprite.height, filter, clamp),
+            .tex = try Impl.Texture.init(sprite.size, filter, clamp),
         };
         errdefer self.tex.deinit();
         try self.update();
@@ -948,9 +945,10 @@ pub const Decal = struct {
     }
     /// Update the decal with any changes in the sprite
     pub fn update(self: *Decal) !void {
+        const size_f = self.sprite.size.cast(f32);
         self.uv_scale = .{
-            .x = 1.0 / @intToFloat(f32, self.sprite.width),
-            .y = 1.0 / @intToFloat(f32, self.sprite.height),
+            .x = 1.0 / size_f.x,
+            .y = 1.0 / size_f.y,
         };
         try self.tex.apply();
         self.tex.update(self.sprite);
@@ -966,10 +964,10 @@ pub const OwnedDecal = struct {
     inner: Decal,
 
     /// Make a new decal and sprite with the given size
-    pub fn initSize(alloc: Allocator, w: u32, h: u32) !OwnedDecal {
+    pub fn initSize(alloc: Allocator, size: VU2D) !OwnedDecal {
         var sprite = try alloc.create(Sprite);
         errdefer alloc.destroy(sprite);
-        sprite.* = try Sprite.initSize(alloc, w, h);
+        sprite.* = try Sprite.initSize(alloc, size);
         errdefer sprite.deinit(alloc);
         return OwnedDecal{ .inner = try Decal.init(sprite, false, true) };
     }
