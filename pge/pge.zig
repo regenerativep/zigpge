@@ -332,6 +332,39 @@ pub const EngineState = struct {
             }
         }
     }
+    pub fn drawAxisAlignedLine(
+        self: *Self,
+        from: V2D,
+        /// negative length is not drawn
+        length: i32,
+        comptime direction: enum { down, right },
+        pixel: Pixel,
+    ) void {
+        const target = self.drawTarget();
+        const size_i = V2D{
+            .x = @intCast(i32, target.width),
+            .y = @intCast(i32, target.height),
+        };
+        if ((from.x < 0 and from.y < 0) or from.x >= size_i.x or from.y >= size_i.y) return;
+        var pos = from.clamp(V2D.Zero, size_i);
+        var i: i32 = 0;
+        while (i <= length and switch (direction) {
+            .down => pos.y < size_i.y,
+            .right => pos.x < size_i.x,
+        }) : (i += 1) {
+            self.drawUnchecked(target, @intCast(u32, pos.x), @intCast(u32, pos.y), pixel);
+            switch (direction) {
+                .down => pos.y += 1,
+                .right => pos.x += 1,
+            }
+        }
+    }
+    pub fn drawRect(self: *Self, tl: V2D, size: V2D, pixel: Pixel) void {
+        self.drawAxisAlignedLine(tl, size.x, .right, pixel);
+        self.drawAxisAlignedLine(tl, size.y, .down, pixel);
+        self.drawAxisAlignedLine(.{ .x = tl.x + size.x, .y = tl.y }, size.y, .down, pixel);
+        self.drawAxisAlignedLine(.{ .x = tl.x, .y = tl.y + size.y }, size.x, .right, pixel);
+    }
     /// Draws a filled rectangle with the top left location and the rectangle size.
     pub fn fillRect(self: *Self, tl: V2D, size: V2D, pixel: Pixel) void {
         const target = self.drawTarget();
@@ -404,9 +437,86 @@ pub const EngineState = struct {
     }
     /// Clears the screen with the specified color
     pub fn clear(self: *Self, pixel: Pixel) void {
-        const target = self.drawTarget();
-        for (target.data) |*p| p.* = pixel;
+        std.mem.set(Pixel, self.drawTarget().data, pixel);
     }
+    pub const LineHeight = 8;
+    pub const MonoCharWidth = 8;
+    pub const MonoCharHeight = 8;
+    pub const TabLengthInSpaces = 4;
+    pub fn drawString(self: *Self, pos: V2D, text: []const u8, pixel: Pixel, scale: u32) void {
+        const font = (self.font_sheet orelse return).inner.sprite;
+        var s = pos;
+        for (text) |c| switch (c) {
+            '\n' => {
+                s.x = pos.x;
+                s.y += @intCast(i32, LineHeight * scale);
+            },
+            '\t' => {
+                s.x += @intCast(i32, MonoCharWidth * TabLengthInSpaces * scale);
+            },
+            else => {
+                const n = c - 32;
+                const font_x = n % 16;
+                const font_y = n / 16;
+                var i: u4 = 0;
+                while (i < MonoCharHeight) : (i += 1) {
+                    var j: u4 = 0;
+                    while (j < MonoCharWidth) : (j += 1) {
+                        if (font.getPixel(j + (font_x * MonoCharWidth), i + (font_y * MonoCharHeight)).c.r > 0) {
+                            var is: u32 = 0;
+                            while (is < scale) : (is += 1) {
+                                var js: u32 = 0;
+                                while (js < scale) : (js += 1) {
+                                    self.draw(.{
+                                        .x = s.x + @intCast(i32, (j * scale) + js),
+                                        .y = s.y + @intCast(i32, (i * scale) + is),
+                                    }, pixel);
+                                }
+                            }
+                        }
+                    }
+                }
+                s.x += @intCast(i32, MonoCharWidth * scale);
+            },
+        };
+    }
+    pub fn getTextSize(text: []const u8) V2D {
+        var width: u32 = 0;
+        var height: u32 = 1;
+        var current_width: u32 = 0;
+        for (text) |c| switch (c) {
+            '\n' => {
+                if (width < current_width) {
+                    width = current_width;
+                }
+                current_width = 0;
+                height += 1;
+            },
+            '\t' => current_width += TabLengthInSpaces,
+            else => current_width += 1,
+        };
+        if (width < current_width)
+            width = current_width;
+        return .{
+            .x = @intCast(i32, width * MonoCharWidth),
+            .y = @intCast(i32, height * MonoCharHeight),
+        };
+    }
+
+    // TODO:
+    // drawCircle, fillCircle
+    // drawTriangle, fillTriangle
+    // drawSprite, drawPartialSprite
+    // drawStringProp, getTextSizeProp
+    // setDecalMode, setDecalStructure
+    // drawPartialDecal
+    // drawExplicitDecal, drawWarpedDecal, drawPartialWarpedDecal
+    // drawRotatedDecal, drawPartialRotatedDecal
+    // drawStringDecal, drawStringDecalProp
+    // drawRotatedStringDecal, drawRotatedStringPropDecal
+    // drawRectDecal, fillRectDecal, drawGradientFillRectDecal
+    // drawPolygonDecal, drawLineDecal
+    // clipLineToScreen
 
     pub fn setDrawLayer(self: *Self, layer: usize, dirty: bool) void {
         if (layer >= self.layers.items.len) return;
@@ -680,26 +790,27 @@ pub fn PixelGameEngine(comptime UserGame: type) type {
             sprite.* = try Sprite.initSize(alloc, 128, 48);
             errdefer sprite.deinit(alloc);
 
-            var did_half = false; // 24 + 24 = 48
-            var y: u32 = 0;
-            var i: usize = 0;
-            while (i < data.len) : (i += 4) {
-                const P = packed struct(u24) { a: u6, b: u6, c: u6, d: u6 };
+            var px: u32 = 0;
+            var py: u32 = 0;
+            var b: usize = 0;
+            while (b < data.len) : (b += 4) {
+                const P = packed struct { d: u6, c: u6, b: u6, a: u6 };
                 const part = std.StaticBitSet(24){ .mask = @bitCast(u24, P{
-                    .a = @intCast(u6, data[i + 0] - 48),
-                    .b = @intCast(u6, data[i + 1] - 48),
-                    .c = @intCast(u6, data[i + 2] - 48),
-                    .d = @intCast(u6, data[i + 3] - 48),
+                    .a = @intCast(u6, data[b + 0] - 48),
+                    .b = @intCast(u6, data[b + 1] - 48),
+                    .c = @intCast(u6, data[b + 2] - 48),
+                    .d = @intCast(u6, data[b + 3] - 48),
                 }) };
-                var j: u32 = 0;
-                while (j < 24) : (j += 1) {
-                    const k: u8 = if (part.isSet(j)) 255 else 0;
-                    // yeah i did a fancy thing here
-                    const x = j + if (did_half) @as(u32, 24) else 0;
-                    sprite.setPixel(x, y, .{ .c = .{ .r = k, .g = k, .b = k, .a = k } });
+                var i: math.Log2Int(u24) = 0;
+                while (i < 24) : (i += 1) {
+                    const k: u8 = if (part.isSet(i)) 255 else 0;
+                    sprite.setPixel(px, py, .{ .c = .{ .r = k, .g = k, .b = k, .a = k } });
+                    py += 1;
+                    if (py == 48) {
+                        px += 1;
+                        py = 0;
+                    }
                 }
-                if (did_half) y += 1;
-                did_half = !did_half;
             }
 
             // TODO: spacing
