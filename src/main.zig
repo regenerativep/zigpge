@@ -64,7 +64,7 @@ pub fn main() !void {
         // Pixel size
         .{ .x = 4, .y = 4 },
         // Screen size in pixels
-        .{ .x = 128, .y = 120 },
+        .{ .x = 256, .y = 240 },
     );
     defer engine.deinit(alloc);
     // Run the game loop

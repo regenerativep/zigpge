@@ -76,7 +76,7 @@ pub fn getProcAddress(comptime T: type, name: [:0]const u8) ?*const T {
 pub fn Extensions(comptime pairs: anytype) type {
     comptime var fields: [pairs.len]std.builtin.Type.StructField = undefined;
     comptime var i = 0;
-    inline for (fields) |*field| {
+    inline for (&fields) |*field| {
         const pair = pairs[i];
         const is_optional = pair.len < 3 or !pair[2];
         const T = if (is_optional) ?*const pair[1] else *const pair[1];
@@ -802,7 +802,7 @@ pub const ClearBufferKind = enum { //(c.GLbitfield) {
 };
 pub fn ClearValue(comptime buffers: []const ClearBufferKind) type {
     comptime var fields: [buffers.len]std.builtin.Type.StructField = undefined;
-    inline for (buffers) |kind, i| {
+    inline for (buffers, 0..) |kind, i| {
         switch (kind) {
             .Color => {
                 const T = struct { r: f32 = 0, g: f32 = 0, b: f32 = 0, a: f32 = 0 };

@@ -422,7 +422,7 @@ pub const EngineState = struct {
             .{ VF2D{ .x = 0.0, .y = 1.0 }, VF2D{ .x = screen_pos.x, .y = screen_dim.y } },
             .{ VF2D{ .x = 1.0, .y = 1.0 }, screen_dim },
             .{ VF2D{ .x = 1.0, .y = 0.0 }, VF2D{ .x = screen_dim.x, .y = screen_pos.y } },
-        }) |pair, i| {
+        }, 0..) |pair, i| {
             vertices[i] = .{
                 .pos = [3]f32{ pair[1].x, pair[1].y, 1.0 },
                 .tex = pair[0],
