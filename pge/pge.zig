@@ -230,7 +230,7 @@ pub const EngineState = struct {
         name: [:0]const u8,
         pixel_size: VU2D,
         screen_size: VU2D,
-    ) Self {
+    ) !Self {
         var self = Self{
             .app_name = name,
             .screen_size = undefined,
@@ -243,7 +243,7 @@ pub const EngineState = struct {
             .last_time = std.time.milliTimestamp(),
             .arena = std.heap.ArenaAllocator.init(alloc),
         };
-        self.updateScreenSize(screen_size);
+        try self.updateScreenSize(alloc, screen_size);
         return self;
     }
 
@@ -258,15 +258,15 @@ pub const EngineState = struct {
     /// Requires x < target.size.x, y < target.size.y
     pub fn drawUnchecked(self: *Self, target: *Sprite, x: u32, y: u32, pixel: Pixel) void {
         switch (self.pixel_mode) {
-            .Normal => target.data[target.pixelIndex(x, y)] = pixel,
+            .Normal => target.data[Sprite.pixelIndex(target.size, x, y)] = pixel,
             .Mask => {
-                if (pixel.c.a == 255) target.data[target.pixelIndex(x, y)] = pixel;
+                if (pixel.c.a == 255) target.data[Sprite.pixelIndex(target.size, x, y)] = pixel;
             },
             .Alpha => {
-                const d = target.data[target.pixelIndex(x, y)];
+                const d = target.data[Sprite.pixelIndex(target.size, x, y)];
                 const a = (@intToFloat(f32, pixel.c.a) / 255.0) / self.blend_factor;
                 const c = 1.0 - a;
-                target.data[target.pixelIndex(x, y)] = Pixel{ .c = .{
+                target.data[Sprite.pixelIndex(target.size, x, y)] = Pixel{ .c = .{
                     .r = @floatToInt(u8, a * @intToFloat(f32, pixel.c.r) + c * @intToFloat(f32, d.c.r)),
                     .g = @floatToInt(u8, a * @intToFloat(f32, pixel.c.g) + c * @intToFloat(f32, d.c.g)),
                     .b = @floatToInt(u8, a * @intToFloat(f32, pixel.c.b) + c * @intToFloat(f32, d.c.b)),
@@ -532,10 +532,14 @@ pub const EngineState = struct {
         self.target_layer = layer;
     }
 
-    pub fn updateScreenSize(self: *Self, size: VU2D) void {
-        assert(size.x > 0 and size.y > 0);
-        self.screen_size = size;
-        const size_f = size.cast(f32);
+    pub fn updateScreenSize(self: *Self, alloc: Allocator, new_size: VU2D) !void {
+        assert(new_size.x > 0 and new_size.y > 0);
+        for (self.layers.items) |*layer| {
+            try layer.draw_target.sprite.resize(alloc, new_size);
+            layer.update = true;
+        }
+        self.screen_size = new_size;
+        const size_f = new_size.cast(f32);
         self.inv_screen_size = .{
             .x = 1.0 / size_f.x,
             .y = 1.0 / size_f.y,
@@ -642,7 +646,7 @@ pub fn PixelGameEngine(comptime UserGame: type) type {
             pixel_size: VU2D,
             screen_size: VU2D,
         ) !Self {
-            var state = EngineState.init(alloc, name, pixel_size, screen_size);
+            var state = try EngineState.init(alloc, name, pixel_size, screen_size);
             var impl = try Impl.init(alloc, &state, name);
             errdefer impl.deinit(alloc);
 
@@ -909,17 +913,50 @@ pub const Sprite = struct {
     /// Sets a specific pixel on the sprite
     pub fn setPixel(self: *Sprite, pos: V2D, pixel: Pixel) void {
         if (pos.x < 0 or pos.y < 0 or pos.x >= self.size.x or pos.y >= self.size.y) return;
-        self.data[self.pixelIndex(pos.x, pos.y)] = pixel;
+        self.data[pixelIndex(self.size, pos.x, pos.y)] = pixel;
     }
     /// Gets a specific pixel on the sprite
     pub fn getPixel(self: *Sprite, pos: V2D) Pixel {
         // TODO: sample mode?
         assert(pos.x >= 0 and pos.y >= 0 and pos.x < self.size.x and pos.y < self.size.y);
-        return self.data[self.pixelIndex(pos.x, pos.y)];
+        return self.data[pixelIndex(self.size, pos.x, pos.y)];
     }
 
-    pub inline fn pixelIndex(self: *Sprite, x: anytype, y: anytype) usize {
-        return (@intCast(usize, y) * self.size.x) + @intCast(usize, x);
+    pub inline fn pixelIndex(size: VU2D, x: anytype, y: anytype) usize {
+        return (@intCast(usize, y) * size.x) + @intCast(usize, x);
+    }
+
+    pub fn resize(self: *Sprite, alloc: Allocator, new_size: VU2D) !void {
+        if (new_size.x < self.size.x) {
+            for (0..math.min(self.size.y, new_size.y)) |j| for (0..new_size.x) |i| {
+                self.data[pixelIndex(new_size, i, j)] =
+                    self.data[pixelIndex(self.size, i, j)];
+            };
+        }
+        self.data = try alloc.realloc(self.data, new_size.x * new_size.y);
+        if (new_size.x > self.size.x) {
+            var j: usize = std.math.min(self.size.y, new_size.y);
+            while (j > 0) {
+                j -= 1;
+                var i: usize = self.size.x;
+                while (i > 0) {
+                    i -= 1;
+                    self.data[pixelIndex(new_size, i, j)] =
+                        self.data[pixelIndex(self.size, i, j)];
+                }
+            }
+        }
+        if (new_size.x > self.size.x) {
+            for (0..math.min(self.size.y, new_size.y)) |j| for (self.size.x..new_size.x) |i| {
+                self.data[pixelIndex(new_size, i, j)] = Pixel.Default;
+            };
+        }
+        if (new_size.y > self.size.y) {
+            for (self.size.y..new_size.y) |j| for (0..new_size.x) |i| {
+                self.data[pixelIndex(new_size, i, j)] = Pixel.Default;
+            };
+        }
+        self.size = new_size;
     }
 };
 
