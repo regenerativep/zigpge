@@ -72,7 +72,7 @@ pub const Game = struct {
 
         engine.drawDecal(
             &self.my_decal,
-            .{ .x = @intToFloat(f32, engine.mouse_pos.x - 16), .y = @intToFloat(f32, engine.mouse_pos.y - 16) },
+            .{ .x = @floatFromInt(f32, engine.mouse_pos.x - 16), .y = @floatFromInt(f32, engine.mouse_pos.y - 16) },
             pge.VF2D.One,
             pge.Pixel.White,
         );

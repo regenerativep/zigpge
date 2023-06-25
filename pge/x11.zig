@@ -237,7 +237,7 @@ pub const errors = struct {
         pub fn from(event: *c.XErrorEvent) ?ErrorInstance {
             return ErrorInstance{
                 .code = ErrorCode.from(event.error_code) orelse return null,
-                .request = @intToEnum(
+                .request = @enumFromInt(
                     RequestCode,
                     event.request_code,
                 ),
@@ -501,7 +501,7 @@ pub const Window = struct {
             height,
             border_width,
             depth,
-            @enumToInt(class),
+            @intFromEnum(class),
             visual.inner,
             @bitCast(c_ulong, value_mask),
             &_attributes,
@@ -533,7 +533,7 @@ pub const Colormap = struct {
         none = c.AllocNone,
         all = c.AllocAll,
     }) !Colormap {
-        const colormap = c.XCreateColormap(display.inner, window.inner, visual.inner, @enumToInt(alloc));
+        const colormap = c.XCreateColormap(display.inner, window.inner, visual.inner, @intFromEnum(alloc));
         try errors.has();
         return Colormap{ .inner = colormap };
     }
@@ -624,7 +624,7 @@ pub const Attributes = struct {
         inline for (fields) |field| {
             const val = @field(self, field.name);
             switch (field.type) {
-                bool => count += @boolToInt(val),
+                bool => count += @intFromBool(val),
                 else => count += if (val != null) 2 else 0,
             }
         }
@@ -640,7 +640,7 @@ pub const Attributes = struct {
             };
             if (present) {
                 if (i >= buffer.len) return error.Overflow;
-                buffer[i] = @enumToInt(@field(VisualAttribute, field.name));
+                buffer[i] = @intFromEnum(@field(VisualAttribute, field.name));
                 i += 1;
                 switch (field.type) {
                     bool => {},
@@ -656,7 +656,7 @@ pub const Attributes = struct {
                     },
                     else => {
                         if (i >= buffer.len) return error.Overflow;
-                        buffer[i] = @enumToInt(val.?);
+                        buffer[i] = @intFromEnum(val.?);
                         i += 1;
                     },
                 }

@@ -154,7 +154,7 @@ pub fn Extensions(comptime pairs: anytype) type {
             id: c.GLuint,
 
             pub fn init(kind: ShaderKind) Shader {
-                const id = u(fns.glCreateShader)(@enumToInt(kind));
+                const id = u(fns.glCreateShader)(@intFromEnum(kind));
                 assert(getGlError() == null);
                 return Shader{ .id = id };
             }
@@ -267,16 +267,16 @@ pub fn Extensions(comptime pairs: anytype) type {
             }
 
             pub fn bind(self: Buffer, target: BufferTarget) void {
-                u(fns.glBindBuffer)(@enumToInt(target), self.id);
+                u(fns.glBindBuffer)(@intFromEnum(target), self.id);
                 assert(getGlError() == null);
             }
 
             pub fn data(target: BufferTarget, comptime T: type, d: []const T, usage: UsagePattern) !void {
                 u(fns.glBufferData)(
-                    @enumToInt(target),
+                    @intFromEnum(target),
                     @intCast(c.GLsizeiptr, @sizeOf(T) * d.len),
                     d.ptr,
-                    @enumToInt(usage),
+                    @intFromEnum(usage),
                 );
                 if (getGlError()) |e| return e;
             }
@@ -343,8 +343,8 @@ pub fn Extensions(comptime pairs: anytype) type {
             u(fns.glVertexAttribPointer)(
                 @intCast(c.GLuint, index),
                 @intCast(c.GLint, size),
-                @enumToInt(kind),
-                @boolToInt(normalized),
+                @intFromEnum(kind),
+                @intFromBool(normalized),
                 @intCast(c.GLsizei, stride),
                 offset,
             );
@@ -389,7 +389,7 @@ pub const Texture = struct {
     }
 
     pub fn bind(self: Texture, target: TextureTarget) void {
-        c.glBindTexture(@enumToInt(target), self.id);
+        c.glBindTexture(@intFromEnum(target), self.id);
         assert(getGlError() == null);
     }
 };
@@ -472,11 +472,11 @@ pub fn texParameter(
     // TODO: i might be missing one or two guarantees
     const info = @typeInfo(@TypeOf(value));
     if (info == .Enum)
-        c.glTexParameteri(@enumToInt(target), @enumToInt(pname), @enumToInt(value))
+        c.glTexParameteri(@intFromEnum(target), @intFromEnum(pname), @intFromEnum(value))
     else if (info == .Int)
-        c.glTexParameteri(@enumToInt(target), @enumToInt(pname), @intCast(c.GLint, value))
+        c.glTexParameteri(@intFromEnum(target), @intFromEnum(pname), @intCast(c.GLint, value))
     else if (info == .Float)
-        c.glTexParameterf(@enumToInt(target), @enumToInt(pname), value);
+        c.glTexParameterf(@intFromEnum(target), @intFromEnum(pname), value);
     assert(getGlError() == null);
 }
 
@@ -695,14 +695,14 @@ pub fn texImage2D(
     }
     if (level != 0) assert(target != .Rectangle and target != .ProxyRectangle);
     c.glTexImage2D(
-        @enumToInt(target),
+        @intFromEnum(target),
         @intCast(c.GLint, level),
-        @enumToInt(internal_format),
+        @intFromEnum(internal_format),
         @intCast(c.GLsizei, width),
         @intCast(c.GLsizei, height),
         @intCast(c.GLint, border),
-        @enumToInt(format),
-        @enumToInt(kind),
+        @intFromEnum(format),
+        @intFromEnum(kind),
         data,
     );
     assert(getGlError() == null);
@@ -787,8 +787,8 @@ pub fn readPixels(
         @intCast(c.GLint, y),
         @intCast(c.GLsizei, width),
         @intCast(c.GLsizei, height),
-        @enumToInt(format),
-        @enumToInt(kind),
+        @intFromEnum(format),
+        @intFromEnum(kind),
         out_data,
     );
     assert(getGlError() == null);
@@ -894,7 +894,7 @@ pub const ScaleFactor = enum(c.GLenum) {
     OneMinusSrc1Alpha = c.GL_ONE_MINUS_SRC1_ALPHA,
 };
 pub fn blendFunc(sfactor: ScaleFactor, dfactor: ScaleFactor) void {
-    c.glBlendFunc(@enumToInt(sfactor), @enumToInt(dfactor));
+    c.glBlendFunc(@intFromEnum(sfactor), @intFromEnum(dfactor));
     assert(getGlError() == null);
 }
 
@@ -929,7 +929,7 @@ pub const Capability = enum(c.GLenum) {
     ProgramPointSize = c.GL_PROGRAM_POINT_SIZE,
 };
 pub fn enable(capability: Capability) void {
-    c.glEnable(@enumToInt(capability));
+    c.glEnable(@intFromEnum(capability));
     assert(getGlError() == null);
 }
 
@@ -948,6 +948,6 @@ pub const DrawMode = enum(c.GLenum) {
     Patches = c.GL_PATCHES,
 };
 pub fn drawArrays(mode: DrawMode, first: u32, count: u32) void {
-    c.glDrawArrays(@enumToInt(mode), @intCast(c.GLint, first), @intCast(c.GLsizei, count));
+    c.glDrawArrays(@intFromEnum(mode), @intCast(c.GLint, first), @intCast(c.GLsizei, count));
     assert(getGlError() == null);
 }

@@ -89,7 +89,7 @@ pub const XState = struct {
             xev.xclient.window = window.inner;
             xev.xclient.message_type = wm_state;
             xev.xclient.format = 32;
-            xev.xclient.data.l = [5]c_long{ @boolToInt(full_screen), @intCast(c_long, wm_state_fullscreen), 0, 0, 0 };
+            xev.xclient.data.l = [5]c_long{ @intFromBool(full_screen), @intCast(c_long, wm_state_fullscreen), 0, 0, 0 };
 
             window.map(display);
             try display.sendEvent(
@@ -346,10 +346,10 @@ pub const Texture = struct {
 
 pub fn clearBuffer(p: Pixel, comptime depth: bool) void {
     g.clear(&(.{.Color} ++ if (depth) .{.Depth} else .{}), .{ .color = .{
-        .r = @intToFloat(f32, p.c.r) / 255.0,
-        .g = @intToFloat(f32, p.c.g) / 255.0,
-        .b = @intToFloat(f32, p.c.b) / 255.0,
-        .a = @intToFloat(f32, p.c.a) / 255.0,
+        .r = @floatFromInt(f32, p.c.r) / 255.0,
+        .g = @floatFromInt(f32, p.c.g) / 255.0,
+        .b = @floatFromInt(f32, p.c.b) / 255.0,
+        .a = @floatFromInt(f32, p.c.a) / 255.0,
     } });
 }
 

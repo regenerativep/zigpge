@@ -6,6 +6,10 @@ const Allocator = std.mem.Allocator;
 const LinuxImpl = @import("linux.zig");
 pub const Impl = LinuxImpl;
 
+fn clamp_(val: anytype, lower: @TypeOf(val), upper: @TypeOf(val)) @TypeOf(val) {
+    return @max(lower, @min(val, upper));
+}
+
 /// All of the possible keys that can be pressed by the user
 pub const Key = enum {
     A,
@@ -159,6 +163,40 @@ pub const VU2D = V2(u32);
 /// 2D vector of f32s
 pub const VF2D = V2(f32);
 
+pub fn V3(comptime T: type) type {
+    return extern struct {
+        x: T,
+        y: T,
+        z: T,
+
+        const Self = @This();
+        pub const Zero = Self{ .x = 0, .y = 0, .z = 0 };
+        pub const One = Self{ .x = 1, .y = 1, .z = 1 };
+
+        pub fn clamp(value: Self, lower: Self, upper: Self) Self {
+            return .{
+                .x = if (value.x < lower.x) lower.x else if (value.x > upper.x) upper.x else value.x,
+                .y = if (value.y < lower.y) lower.y else if (value.y > upper.y) upper.y else value.y,
+                .z = if (value.z < lower.z) lower.z else if (value.z > upper.z) upper.z else value.z,
+            };
+        }
+
+        pub fn cast(value: Self, comptime Target: type) V3(Target) {
+            return .{
+                .x = math.lossyCast(Target, value.x),
+                .y = math.lossyCast(Target, value.y),
+                .z = math.lossyCast(Target, value.z),
+            };
+        }
+    };
+}
+/// 3D vector of u32s
+pub const VU3D = V3(u32);
+/// 3D vector of i32s
+pub const VI3D = V3(i32);
+/// 3D vector of f32s
+pub const VF3D = V3(f32);
+
 /// Engine state. Everything here is visible by the user
 pub const EngineState = struct {
     /// Name of the application. Appears in the title of the window
@@ -264,12 +302,12 @@ pub const EngineState = struct {
             },
             .Alpha => {
                 const d = target.data[Sprite.pixelIndex(target.size, x, y)];
-                const a = (@intToFloat(f32, pixel.c.a) / 255.0) / self.blend_factor;
+                const a = (@floatFromInt(f32, pixel.c.a) / 255.0) / self.blend_factor;
                 const c = 1.0 - a;
                 target.data[Sprite.pixelIndex(target.size, x, y)] = Pixel{ .c = .{
-                    .r = @floatToInt(u8, a * @intToFloat(f32, pixel.c.r) + c * @intToFloat(f32, d.c.r)),
-                    .g = @floatToInt(u8, a * @intToFloat(f32, pixel.c.g) + c * @intToFloat(f32, d.c.g)),
-                    .b = @floatToInt(u8, a * @intToFloat(f32, pixel.c.b) + c * @intToFloat(f32, d.c.b)),
+                    .r = @intFromFloat(u8, a * @floatFromInt(f32, pixel.c.r) + c * @floatFromInt(f32, d.c.r)),
+                    .g = @intFromFloat(u8, a * @floatFromInt(f32, pixel.c.g) + c * @floatFromInt(f32, d.c.g)),
+                    .b = @intFromFloat(u8, a * @floatFromInt(f32, pixel.c.b) + c * @floatFromInt(f32, d.c.b)),
                 } };
             },
         }
@@ -560,14 +598,14 @@ pub const EngineState = struct {
                 .x = self.screen_size.x * self.pixel_size.x,
                 .y = self.screen_size.y * self.pixel_size.y,
             };
-            const aspect = @intToFloat(f32, prev_size.x) / @intToFloat(f32, prev_size.y);
+            const aspect = @floatFromInt(f32, prev_size.x) / @floatFromInt(f32, prev_size.y);
             self.view_size = .{
                 .x = self.window_size.x,
-                .y = @floatToInt(u32, @intToFloat(f32, self.view_size.x) / aspect),
+                .y = @intFromFloat(u32, @floatFromInt(f32, self.view_size.x) / aspect),
             };
             if (self.view_size.y > self.window_size.y) {
                 self.view_size = .{
-                    .x = @floatToInt(u32, @intToFloat(f32, self.window_size.y) * aspect),
+                    .x = @intFromFloat(u32, @floatFromInt(f32, self.window_size.y) * aspect),
                     .y = self.window_size.y,
                 };
             }
@@ -692,26 +730,26 @@ pub fn PixelGameEngine(comptime UserGame: type) type {
             const now = std.time.milliTimestamp();
             const elapsed = now - self.state.last_time;
             self.state.last_time = now;
-            const fElapsed = @intToFloat(f32, elapsed) / std.time.ms_per_s;
+            const fElapsed = @floatFromInt(f32, elapsed) / std.time.ms_per_s;
 
             // TODO: some console suspend time thing
 
             try self.impl.handleSystemEvent(&self.state);
 
             self.state.mouse_pos = .{
-                .x = math.clamp(
-                    @floatToInt(i32, @intToFloat(f32, self.state.mouse_pos_cache.x - self.state.view_pos.x) /
-                        @intToFloat(f32, @intCast(i32, self.state.window_size.x) - (self.state.view_pos.x * 2)) *
-                        @intToFloat(f32, self.state.screen_size.x)),
+                .x = clamp_(
+                    @intFromFloat(i32, @floatFromInt(f32, self.state.mouse_pos_cache.x - self.state.view_pos.x) /
+                        @floatFromInt(f32, @intCast(i32, self.state.window_size.x) - (self.state.view_pos.x * 2)) *
+                        @floatFromInt(f32, self.state.screen_size.x)),
                     0,
-                    self.state.screen_size.x - 1,
+                    @intCast(i32, self.state.screen_size.x - 1),
                 ),
-                .y = math.clamp(
-                    @floatToInt(i32, @intToFloat(f32, self.state.mouse_pos_cache.y - self.state.view_pos.y) /
-                        @intToFloat(f32, @intCast(i32, self.state.window_size.y) - (self.state.view_pos.y * 2)) *
-                        @intToFloat(f32, self.state.screen_size.y)),
+                .y = clamp_(
+                    @intFromFloat(i32, @floatFromInt(f32, self.state.mouse_pos_cache.y - self.state.view_pos.y) /
+                        @floatFromInt(f32, @intCast(i32, self.state.window_size.y) - (self.state.view_pos.y * 2)) *
+                        @floatFromInt(f32, self.state.screen_size.y)),
                     0,
-                    self.state.screen_size.y - 1,
+                    @intCast(i32, self.state.screen_size.y - 1),
                 ),
             };
             self.state.mouse_wheel_delta = self.state.mouse_wheel_delta_cache;
@@ -755,13 +793,13 @@ pub fn PixelGameEngine(comptime UserGame: type) type {
 
             const every_n_seconds: f32 = 1;
             if (self.second_count > every_n_seconds) {
-                const fps = @intToFloat(f32, self.frame_i) / self.second_count;
+                const fps = @floatFromInt(f32, self.frame_i) / self.second_count;
                 const format = "Pixel Game Engine - {s} - FPS: {}";
                 var buf = [_]u8{0} ** (format.len + 257);
                 var title = std.fmt.bufPrintZ(
                     buf[0 .. buf.len - 1],
                     format,
-                    .{ self.state.app_name, if (fps > 9999) 9999 else @floatToInt(u32, fps) },
+                    .{ self.state.app_name, if (fps > 9999) 9999 else @intFromFloat(u32, fps) },
                 ) catch buf[0 .. buf.len - 1 :0];
                 self.impl.setWindowTitle(title);
                 self.frame_i = 0;
@@ -928,14 +966,14 @@ pub const Sprite = struct {
 
     pub fn resize(self: *Sprite, alloc: Allocator, new_size: VU2D) !void {
         if (new_size.x < self.size.x) {
-            for (0..math.min(self.size.y, new_size.y)) |j| for (0..new_size.x) |i| {
+            for (0..@min(self.size.y, new_size.y)) |j| for (0..new_size.x) |i| {
                 self.data[pixelIndex(new_size, i, j)] =
                     self.data[pixelIndex(self.size, i, j)];
             };
         }
         self.data = try alloc.realloc(self.data, new_size.x * new_size.y);
         if (new_size.x > self.size.x) {
-            var j: usize = std.math.min(self.size.y, new_size.y);
+            var j: usize = @min(self.size.y, new_size.y);
             while (j > 0) {
                 j -= 1;
                 var i: usize = self.size.x;
@@ -947,7 +985,7 @@ pub const Sprite = struct {
             }
         }
         if (new_size.x > self.size.x) {
-            for (0..math.min(self.size.y, new_size.y)) |j| for (self.size.x..new_size.x) |i| {
+            for (0..@min(self.size.y, new_size.y)) |j| for (self.size.x..new_size.x) |i| {
                 self.data[pixelIndex(new_size, i, j)] = Pixel.Default;
             };
         }
