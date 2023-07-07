@@ -302,12 +302,12 @@ pub const EngineState = struct {
             },
             .Alpha => {
                 const d = target.data[Sprite.pixelIndex(target.size, x, y)];
-                const a = (@floatFromInt(f32, pixel.c.a) / 255.0) / self.blend_factor;
+                const a = (@as(f32, @floatFromInt(pixel.c.a)) / 255.0) / self.blend_factor;
                 const c = 1.0 - a;
                 target.data[Sprite.pixelIndex(target.size, x, y)] = Pixel{ .c = .{
-                    .r = @intFromFloat(u8, a * @floatFromInt(f32, pixel.c.r) + c * @floatFromInt(f32, d.c.r)),
-                    .g = @intFromFloat(u8, a * @floatFromInt(f32, pixel.c.g) + c * @floatFromInt(f32, d.c.g)),
-                    .b = @intFromFloat(u8, a * @floatFromInt(f32, pixel.c.b) + c * @floatFromInt(f32, d.c.b)),
+                    .r = @intFromFloat(a * @as(f32, @floatFromInt(pixel.c.r)) + c * @as(f32, @floatFromInt(d.c.r))),
+                    .g = @intFromFloat(a * @as(f32, @floatFromInt(pixel.c.g)) + c * @as(f32, @floatFromInt(d.c.g))),
+                    .b = @intFromFloat(a * @as(f32, @floatFromInt(pixel.c.b)) + c * @as(f32, @floatFromInt(d.c.b))),
                 } };
             },
         }
@@ -402,8 +402,18 @@ pub const EngineState = struct {
     pub fn drawRect(self: *Self, tl: V2D, size: VU2D, pixel: Pixel) void {
         self.drawAxisAlignedLine(tl, size.x, .right, pixel);
         self.drawAxisAlignedLine(tl, size.y, .down, pixel);
-        self.drawAxisAlignedLine(.{ .x = tl.x + @intCast(i32, size.x), .y = tl.y }, size.y, .down, pixel);
-        self.drawAxisAlignedLine(.{ .x = tl.x, .y = tl.y + @intCast(i32, size.y) }, size.x, .right, pixel);
+        self.drawAxisAlignedLine(
+            .{ .x = tl.x + @as(i32, @intCast(size.x)), .y = tl.y },
+            size.y,
+            .down,
+            pixel,
+        );
+        self.drawAxisAlignedLine(
+            .{ .x = tl.x, .y = tl.y + @as(i32, @intCast(size.y)) },
+            size.x,
+            .right,
+            pixel,
+        );
     }
     /// Draws a filled rectangle with the top left location and the rectangle size.
     pub fn fillRect(self: *Self, tl: V2D, size: VU2D, pixel: Pixel) void {
@@ -411,7 +421,7 @@ pub const EngineState = struct {
         const t_size_i = target.size.cast(i32);
         const tl_clamped = tl.clamp(V2D.Zero, t_size_i).cast(u32);
         const br_clamped = V2D.clamp(
-            .{ .x = tl.x + @intCast(i32, size.x), .y = tl.y + @intCast(i32, size.y) },
+            .{ .x = tl.x + @as(i32, @intCast(size.x)), .y = tl.y + @as(i32, @intCast(size.y)) },
             V2D.Zero,
             t_size_i,
         ).cast(u32);
@@ -491,10 +501,10 @@ pub const EngineState = struct {
         for (text) |c| switch (c) {
             '\n' => {
                 s.x = pos.x;
-                s.y += @intCast(i32, LineHeight * scale);
+                s.y += @intCast(LineHeight * scale);
             },
             '\t' => {
-                s.x += @intCast(i32, MonoCharWidth * TabLengthInSpaces * scale);
+                s.x += @intCast(MonoCharWidth * TabLengthInSpaces * scale);
             },
             else => {
                 const n = c - 32;
@@ -513,15 +523,15 @@ pub const EngineState = struct {
                                 var js: u32 = 0;
                                 while (js < scale) : (js += 1) {
                                     self.draw(.{
-                                        .x = s.x + @intCast(i32, (j * scale) + js),
-                                        .y = s.y + @intCast(i32, (i * scale) + is),
+                                        .x = s.x + @as(i32, @intCast((j * scale) + js)),
+                                        .y = s.y + @as(i32, @intCast((i * scale) + is)),
                                     }, pixel);
                                 }
                             }
                         }
                     }
                 }
-                s.x += @intCast(i32, MonoCharWidth * scale);
+                s.x += @intCast(MonoCharWidth * scale);
             },
         };
     }
@@ -598,14 +608,18 @@ pub const EngineState = struct {
                 .x = self.screen_size.x * self.pixel_size.x,
                 .y = self.screen_size.y * self.pixel_size.y,
             };
-            const aspect = @floatFromInt(f32, prev_size.x) / @floatFromInt(f32, prev_size.y);
+            const aspect = @as(f32, @floatFromInt(prev_size.x)) / @as(f32, @floatFromInt(prev_size.y));
             self.view_size = .{
                 .x = self.window_size.x,
-                .y = @intFromFloat(u32, @floatFromInt(f32, self.view_size.x) / aspect),
+                .y = @intFromFloat(
+                    @as(f32, @floatFromInt(self.view_size.x)) / aspect,
+                ),
             };
             if (self.view_size.y > self.window_size.y) {
                 self.view_size = .{
-                    .x = @intFromFloat(u32, @floatFromInt(f32, self.window_size.y) * aspect),
+                    .x = @intFromFloat(
+                        @as(f32, @floatFromInt(self.window_size.y)) * aspect,
+                    ),
                     .y = self.window_size.y,
                 };
             }
@@ -730,7 +744,7 @@ pub fn PixelGameEngine(comptime UserGame: type) type {
             const now = std.time.milliTimestamp();
             const elapsed = now - self.state.last_time;
             self.state.last_time = now;
-            const fElapsed = @floatFromInt(f32, elapsed) / std.time.ms_per_s;
+            const fElapsed = @as(f32, @floatFromInt(elapsed)) / std.time.ms_per_s;
 
             // TODO: some console suspend time thing
 
@@ -738,18 +752,18 @@ pub fn PixelGameEngine(comptime UserGame: type) type {
 
             self.state.mouse_pos = .{
                 .x = clamp_(
-                    @intFromFloat(i32, @floatFromInt(f32, self.state.mouse_pos_cache.x - self.state.view_pos.x) /
-                        @floatFromInt(f32, @intCast(i32, self.state.window_size.x) - (self.state.view_pos.x * 2)) *
-                        @floatFromInt(f32, self.state.screen_size.x)),
+                    @as(i32, @intFromFloat(@as(f32, @floatFromInt(self.state.mouse_pos_cache.x - self.state.view_pos.x)) /
+                        @as(f32, @floatFromInt(@as(i32, @intCast(self.state.window_size.x)) - (self.state.view_pos.x * 2))) *
+                        @as(f32, @floatFromInt(self.state.screen_size.x)))),
                     0,
-                    @intCast(i32, self.state.screen_size.x - 1),
+                    @as(i32, @intCast(self.state.screen_size.x - 1)),
                 ),
                 .y = clamp_(
-                    @intFromFloat(i32, @floatFromInt(f32, self.state.mouse_pos_cache.y - self.state.view_pos.y) /
-                        @floatFromInt(f32, @intCast(i32, self.state.window_size.y) - (self.state.view_pos.y * 2)) *
-                        @floatFromInt(f32, self.state.screen_size.y)),
+                    @as(i32, @intFromFloat(@as(f32, @floatFromInt(self.state.mouse_pos_cache.y - self.state.view_pos.y)) /
+                        @as(f32, @floatFromInt(@as(i32, @intCast(self.state.window_size.y)) - (self.state.view_pos.y * 2))) *
+                        @as(f32, @floatFromInt(self.state.screen_size.y)))),
                     0,
-                    @intCast(i32, self.state.screen_size.y - 1),
+                    @as(i32, @intCast(self.state.screen_size.y - 1)),
                 ),
             };
             self.state.mouse_wheel_delta = self.state.mouse_wheel_delta_cache;
@@ -793,13 +807,13 @@ pub fn PixelGameEngine(comptime UserGame: type) type {
 
             const every_n_seconds: f32 = 1;
             if (self.second_count > every_n_seconds) {
-                const fps = @floatFromInt(f32, self.frame_i) / self.second_count;
+                const fps = @as(f32, @floatFromInt(self.frame_i)) / self.second_count;
                 const format = "Pixel Game Engine - {s} - FPS: {}";
                 var buf = [_]u8{0} ** (format.len + 257);
                 var title = std.fmt.bufPrintZ(
                     buf[0 .. buf.len - 1],
                     format,
-                    .{ self.state.app_name, if (fps > 9999) 9999 else @intFromFloat(u32, fps) },
+                    .{ self.state.app_name, if (fps > 9999) 9999 else @as(u32, @intFromFloat(fps)) },
                 ) catch buf[0 .. buf.len - 1 :0];
                 self.impl.setWindowTitle(title);
                 self.frame_i = 0;
@@ -838,12 +852,12 @@ pub fn PixelGameEngine(comptime UserGame: type) type {
             var b: usize = 0;
             while (b < data.len) : (b += 4) {
                 const P = packed struct { d: u6, c: u6, b: u6, a: u6 };
-                const part = std.StaticBitSet(24){ .mask = @bitCast(u24, P{
-                    .a = @intCast(u6, data[b + 0] - 48),
-                    .b = @intCast(u6, data[b + 1] - 48),
-                    .c = @intCast(u6, data[b + 2] - 48),
-                    .d = @intCast(u6, data[b + 3] - 48),
-                }) };
+                const part = std.StaticBitSet(24){ .mask = @as(u24, @bitCast(P{
+                    .a = @intCast(data[b + 0] - 48),
+                    .b = @intCast(data[b + 1] - 48),
+                    .c = @intCast(data[b + 2] - 48),
+                    .d = @intCast(data[b + 3] - 48),
+                })) };
                 var i: math.Log2Int(u24) = 0;
                 while (i < 24) : (i += 1) {
                     const k: u8 = if (part.isSet(i)) 255 else 0;
@@ -956,12 +970,14 @@ pub const Sprite = struct {
     /// Gets a specific pixel on the sprite
     pub fn getPixel(self: *Sprite, pos: V2D) Pixel {
         // TODO: sample mode?
-        assert(pos.x >= 0 and pos.y >= 0 and pos.x < self.size.x and pos.y < self.size.y);
+        assert(pos.x >= 0 and pos.y >= 0 and
+            pos.x < self.size.x and pos.y < self.size.y);
         return self.data[pixelIndex(self.size, pos.x, pos.y)];
     }
 
     pub inline fn pixelIndex(size: VU2D, x: anytype, y: anytype) usize {
-        return (@intCast(usize, y) * size.x) + @intCast(usize, x);
+        return (@as(usize, @intCast(y)) * size.x) +
+            @as(usize, @intCast(x));
     }
 
     pub fn resize(self: *Sprite, alloc: Allocator, new_size: VU2D) !void {

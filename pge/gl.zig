@@ -30,10 +30,10 @@ pub fn getGlError() ?GlError {
 
 pub fn viewport(x: i32, y: i32, width: u32, height: u32) void {
     c.glViewport(
-        @intCast(c.GLint, x),
-        @intCast(c.GLint, y),
-        @intCast(c.GLsizei, width),
-        @intCast(c.GLsizei, height),
+        @intCast(x),
+        @intCast(y),
+        @intCast(width),
+        @intCast(height),
     );
     assert(getGlError() == null);
 }
@@ -70,7 +70,7 @@ pub const DataKind = enum(c.GLenum) {
 };
 
 pub fn getProcAddress(comptime T: type, name: [:0]const u8) ?*const T {
-    return @ptrCast(?*const T, c.glXGetProcAddress(name.ptr));
+    return @ptrCast(c.glXGetProcAddress(name.ptr));
 }
 
 pub fn Extensions(comptime pairs: anytype) type {
@@ -83,7 +83,7 @@ pub fn Extensions(comptime pairs: anytype) type {
         field.* = .{
             .name = pair[0],
             .type = T,
-            .default_value = if (is_optional) @ptrCast(?*const anyopaque, &@as(T, null)) else null,
+            .default_value = if (is_optional) @ptrCast(&@as(T, null)) else null,
             .is_comptime = false,
             .alignment = @alignOf(T),
         };
@@ -139,7 +139,7 @@ pub fn Extensions(comptime pairs: anytype) type {
 
         pub fn swapInterval(display: x11.Display, drawable: c.GLXDrawable, interval: u32) void {
             assert(has("glXSwapIntervalEXT"));
-            u(fns.glXSwapIntervalEXT)(display.inner, drawable, @intCast(c_int, interval));
+            u(fns.glXSwapIntervalEXT)(display.inner, drawable, @intCast(interval));
         }
 
         pub const ShaderKind = enum(c.GLenum) {
@@ -168,7 +168,7 @@ pub fn Extensions(comptime pairs: anytype) type {
                 if (lens != null) assert(lens.?.len == strs.len);
                 u(fns.glShaderSource)(
                     self.id,
-                    @intCast(c.GLsizei, strs.len),
+                    @intCast(strs.len),
                     strs.ptr,
                     if (lens != null) lens.?.ptr else null,
                 );
@@ -274,7 +274,7 @@ pub fn Extensions(comptime pairs: anytype) type {
             pub fn data(target: BufferTarget, comptime T: type, d: []const T, usage: UsagePattern) !void {
                 u(fns.glBufferData)(
                     @intFromEnum(target),
-                    @intCast(c.GLsizeiptr, @sizeOf(T) * d.len),
+                    @intCast(@sizeOf(T) * d.len),
                     d.ptr,
                     @intFromEnum(usage),
                 );
@@ -341,18 +341,18 @@ pub fn Extensions(comptime pairs: anytype) type {
             });
             assert(size != VertexArray.BGRA or normalized);
             u(fns.glVertexAttribPointer)(
-                @intCast(c.GLuint, index),
-                @intCast(c.GLint, size),
+                @intCast(index),
+                @intCast(size),
                 @intFromEnum(kind),
                 @intFromBool(normalized),
-                @intCast(c.GLsizei, stride),
+                @intCast(stride),
                 offset,
             );
             if (getGlError()) |e| return e;
         }
         pub fn enableVertexAttribArray(index: u32) void {
             assert(index < c.GL_MAX_VERTEX_ATTRIBS);
-            u(fns.glEnableVertexAttribArray)(@intCast(c.GLuint, index));
+            u(fns.glEnableVertexAttribArray)(@intCast(index));
             assert(getGlError() == null);
         }
     };
@@ -474,7 +474,7 @@ pub fn texParameter(
     if (info == .Enum)
         c.glTexParameteri(@intFromEnum(target), @intFromEnum(pname), @intFromEnum(value))
     else if (info == .Int)
-        c.glTexParameteri(@intFromEnum(target), @intFromEnum(pname), @intCast(c.GLint, value))
+        c.glTexParameteri(@intFromEnum(target), @intFromEnum(pname), @intCast(value))
     else if (info == .Float)
         c.glTexParameterf(@intFromEnum(target), @intFromEnum(pname), value);
     assert(getGlError() == null);
@@ -696,11 +696,11 @@ pub fn texImage2D(
     if (level != 0) assert(target != .Rectangle and target != .ProxyRectangle);
     c.glTexImage2D(
         @intFromEnum(target),
-        @intCast(c.GLint, level),
+        @intCast(level),
         @intFromEnum(internal_format),
-        @intCast(c.GLsizei, width),
-        @intCast(c.GLsizei, height),
-        @intCast(c.GLint, border),
+        @intCast(width),
+        @intCast(height),
+        @intCast(border),
         @intFromEnum(format),
         @intFromEnum(kind),
         data,
@@ -783,10 +783,10 @@ pub fn readPixels(
             else => true,
         });
     c.glReadPixels(
-        @intCast(c.GLint, x),
-        @intCast(c.GLint, y),
-        @intCast(c.GLsizei, width),
-        @intCast(c.GLsizei, height),
+        @intCast(x),
+        @intCast(y),
+        @intCast(width),
+        @intCast(height),
         @intFromEnum(format),
         @intFromEnum(kind),
         out_data,
@@ -809,7 +809,7 @@ pub fn ClearValue(comptime buffers: []const ClearBufferKind) type {
                 fields[i] = .{
                     .name = "color",
                     .type = T,
-                    .default_value = @ptrCast(?*const anyopaque, &T{}),
+                    .default_value = @ptrCast(&T{}),
                     .is_comptime = false,
                     .alignment = @alignOf(T),
                 };
@@ -819,7 +819,7 @@ pub fn ClearValue(comptime buffers: []const ClearBufferKind) type {
                 fields[i] = .{
                     .name = "depth",
                     .type = T,
-                    .default_value = @ptrCast(?*const anyopaque, &@as(T, 1.0)),
+                    .default_value = @ptrCast(&@as(T, 1.0)),
                     .is_comptime = false,
                     .alignment = @alignOf(T),
                 };
@@ -829,7 +829,7 @@ pub fn ClearValue(comptime buffers: []const ClearBufferKind) type {
                 fields[i] = .{
                     .name = "depth",
                     .type = T,
-                    .default_value = @ptrCast(?*const anyopaque, &@as(T, 1.0)),
+                    .default_value = @ptrCast(&@as(T, 1.0)),
                     .is_comptime = false,
                     .alignment = @alignOf(T),
                 };
@@ -839,7 +839,7 @@ pub fn ClearValue(comptime buffers: []const ClearBufferKind) type {
                 fields[i] = .{
                     .name = "stencil",
                     .type = T,
-                    .default_value = @ptrCast(?*const anyopaque, &@as(T, 1)),
+                    .default_value = @ptrCast(&@as(T, 1)),
                     .is_comptime = false,
                     .alignment = @alignOf(T),
                 };
@@ -859,7 +859,7 @@ pub fn clear(comptime buffers: []const ClearBufferKind, value: ClearValue(buffer
         .Color => c.glClearColor(value.color.r, value.color.g, value.color.b, value.color.a),
         .Depth => c.glClearDepth(value.depth),
         .DepthF => c.glClearDepthf(value.depth),
-        .Stencil => c.glClearStencil(@intCast(c.GLint, value.stencil)),
+        .Stencil => c.glClearStencil(@intCast(value.stencil)),
     };
     comptime var mask = 0;
     inline for (buffers) |kind| mask |= switch (kind) {
@@ -868,7 +868,7 @@ pub fn clear(comptime buffers: []const ClearBufferKind, value: ClearValue(buffer
         .DepthF => c.GL_DEPTH_BUFFER_BIT,
         .Stencil => c.GL_STENCIL_BUFFER_BIT,
     };
-    c.glClear(@intCast(c.GLbitfield, mask));
+    c.glClear(@intCast(mask));
     assert(getGlError() == null);
 }
 
@@ -948,6 +948,6 @@ pub const DrawMode = enum(c.GLenum) {
     Patches = c.GL_PATCHES,
 };
 pub fn drawArrays(mode: DrawMode, first: u32, count: u32) void {
-    c.glDrawArrays(@intFromEnum(mode), @intCast(c.GLint, first), @intCast(c.GLsizei, count));
+    c.glDrawArrays(@intFromEnum(mode), @intCast(first), @intCast(count));
     assert(getGlError() == null);
 }

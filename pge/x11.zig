@@ -95,7 +95,7 @@ pub const errors = struct {
                         .glxBadCurrentDrawable,
                         .glxBadWindow,
                     };
-                    const be = @intCast(usize, base_error);
+                    const be: usize = @intCast(base_error);
                     if (code < be + glx_errors.len) {
                         return glx_errors[code - be];
                     }
@@ -237,10 +237,7 @@ pub const errors = struct {
         pub fn from(event: *c.XErrorEvent) ?ErrorInstance {
             return ErrorInstance{
                 .code = ErrorCode.from(event.error_code) orelse return null,
-                .request = @enumFromInt(
-                    RequestCode,
-                    event.request_code,
-                ),
+                .request = @enumFromInt(event.request_code),
             };
         }
     };
@@ -344,7 +341,7 @@ pub const Display = struct {
             self.inner,
             window.inner,
             protocols.ptr,
-            @intCast(c_int, protocols.len),
+            @intCast(protocols.len),
         ) == 0)
             try errors.has();
     }
@@ -359,7 +356,7 @@ pub const Display = struct {
             self.inner,
             window.inner,
             boolToCBool(propagate),
-            @bitCast(c_long, event_mask),
+            @bitCast(event_mask),
             event,
         ) == 0)
             try errors.has();
@@ -373,7 +370,7 @@ pub const Display = struct {
     }
     // assume that XPending will not return a negative value
     pub fn pending(display: Display) u32 {
-        return @intCast(u32, c.XPending(display.inner));
+        return @intCast(c.XPending(display.inner));
     }
 
     /// this will block if no available events
@@ -491,7 +488,7 @@ pub const Window = struct {
         value_mask: WindowAttributeSet,
         attributes: WindowAttributes,
     ) !Window {
-        var _attributes = @bitCast(c.XSetWindowAttributes, attributes);
+        var _attributes: c.XSetWindowAttributes = @bitCast(attributes);
         const window = c.XCreateWindow(
             display.inner,
             parent.inner,
@@ -503,7 +500,7 @@ pub const Window = struct {
             depth,
             @intFromEnum(class),
             visual.inner,
-            @bitCast(c_ulong, value_mask),
+            @bitCast(value_mask),
             &_attributes,
         );
         try errors.has();
@@ -651,7 +648,7 @@ pub const Attributes = struct {
                     },
                     ?u31 => {
                         if (i >= buffer.len) return error.Overflow;
-                        buffer[i] = @intCast(i32, val.?);
+                        buffer[i] = @intCast(val.?);
                         i += 1;
                     },
                     else => {

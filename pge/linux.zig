@@ -89,7 +89,13 @@ pub const XState = struct {
             xev.xclient.window = window.inner;
             xev.xclient.message_type = wm_state;
             xev.xclient.format = 32;
-            xev.xclient.data.l = [5]c_long{ @intFromBool(full_screen), @intCast(c_long, wm_state_fullscreen), 0, 0, 0 };
+            xev.xclient.data.l = [5]c_long{
+                @intFromBool(full_screen),
+                @intCast(wm_state_fullscreen),
+                0,
+                0,
+                0,
+            };
 
             window.map(display);
             try display.sendEvent(
@@ -176,7 +182,7 @@ pub fn init(alloc: Allocator, state: *EngineState, name: [:0]const u8) !Self {
     errdefer x_state.display.makeCurrent(x.Window{ .inner = 0 }, x.Context{ .inner = null }) catch unreachable;
 
     const gwa = try x_state.window.getAttributes(x_state.display);
-    g.viewport(0, 0, @intCast(u32, gwa.width), @intCast(u32, gwa.height));
+    g.viewport(0, 0, @intCast(gwa.width), @intCast(gwa.height));
 
     try ge.load();
 
@@ -334,7 +340,7 @@ pub const Texture = struct {
             0,
             .RGBA,
             .UnsignedByte,
-            @ptrCast([*]const u8, sprite.data.ptr),
+            @ptrCast(sprite.data.ptr),
         );
     }
 
@@ -346,10 +352,10 @@ pub const Texture = struct {
 
 pub fn clearBuffer(p: Pixel, comptime depth: bool) void {
     g.clear(&(.{.Color} ++ if (depth) .{.Depth} else .{}), .{ .color = .{
-        .r = @floatFromInt(f32, p.c.r) / 255.0,
-        .g = @floatFromInt(f32, p.c.g) / 255.0,
-        .b = @floatFromInt(f32, p.c.b) / 255.0,
-        .a = @floatFromInt(f32, p.c.a) / 255.0,
+        .r = @as(f32, @floatFromInt(p.c.r)) / 255.0,
+        .g = @as(f32, @floatFromInt(p.c.g)) / 255.0,
+        .b = @as(f32, @floatFromInt(p.c.b)) / 255.0,
+        .a = @as(f32, @floatFromInt(p.c.a)) / 255.0,
     } });
 }
 
@@ -363,12 +369,12 @@ pub fn handleSystemEvent(self: *Self, p: *EngineState) !void {
             switch (xev.type) {
                 x.c.Expose => {
                     const attr = try self.x_state.window.getAttributes(self.x_state.display); // should be no error
-                    p.updateWindowSize(.{ .x = @intCast(u32, attr.width), .y = @intCast(u32, attr.height) });
+                    p.updateWindowSize(.{ .x = @intCast(attr.width), .y = @intCast(attr.height) });
                 },
                 x.c.ConfigureNotify => {
                     p.updateWindowSize(.{
-                        .x = @intCast(u32, xev.xconfigure.width),
-                        .y = @intCast(u32, xev.xconfigure.height),
+                        .x = @intCast(xev.xconfigure.width),
+                        .y = @intCast(xev.xconfigure.height),
                     });
                 },
                 x.c.KeyPress => {
@@ -475,7 +481,7 @@ pub fn drawDecal(self: *Self, decal: pge.DecalInstance) !void {
         .Strip => .TriangleStrip,
         .List => .Triangles,
         .Line => return,
-    }, 0, @intCast(u32, decal.vertices.len));
+    }, 0, @intCast(decal.vertices.len));
 }
 
 pub fn displayFrame(self: *Self) void {
